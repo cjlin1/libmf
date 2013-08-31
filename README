@@ -1,0 +1,97 @@
+LIBMF is a package for solving large-scale matrix factorization for recommender
+systems. This document explains the usage of LIBMF. 
+
+
+Table of Contents
+=================
+
+- Installation and Data Format
+- Quick Start
+- Formulation
+- Usage
+- Additional Information
+
+
+Installation and Data Format
+============================
+
+LIBMF requires Unix systems and g++ 4.6 or higher.
+
+On Unix systems, type
+
+    $ make
+
+to build the ``libmf'' program.
+
+
+The data format is:
+
+    <user_id> <item_id> <rating>
+
+
+Quick Start
+===========
+
+You can simply type
+
+    $ ./demo.sh
+
+to run a demostration.
+
+
+The workflow of LIBMF is:
+
+    text_train_file =======> binary_train_file =======> model
+                    convert                     train              
+    
+                                               <model>
+    text_test_file  =======> binary_test_file  =======> prediction
+                    convert                    predict
+
+
+First we convert both training and test files from text files to binary files
+because it reduces data loading time significantly. 
+
+    $ ./libmf convert train_file binary_train_file
+    $ ./libmf convert test_file binary_test_file
+    [output skipped]
+
+Then we learn a model from the binary training file.
+
+    $ ./libmf train binary_train_file model
+    [output skipped]
+
+Finally, we use the model to predict the binary test file.
+
+    $ ./libmf predict binary_test_file model output
+    [output skipped]
+
+
+Formulation
+===========
+
+For the detail of how we solve the above problem, please check Appendix A in [1].
+
+
+Usage
+=====
+
+There are five commands in LIBMF: convert, train, predict, and view. You
+can check the instruction of these commands by running:
+
+    $ ./libmf
+
+To check the usage of each command, please run:
+
+    $ ./libmf COMMAND
+
+
+Additional Information
+======================
+[1] Y. Zhuang, W.-S. Chin, Y.-C. Juan, and C.-J. Lin.  A Fast Parallel SGD for
+Matrix Factorization in Shared Memory Systems. Proceedings of ACM Recommender
+Systems 2013.
+www.csie.ntu.edu.tw/~cjlin/papers/libmf.pdf
+
+For any questions and comments, please email
+cjlin@csie.ntu.edu.tw
