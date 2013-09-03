@@ -24,7 +24,7 @@ ConvertOption::ConvertOption(int argc, char **argv) {
 }
 void ConvertOption::exit_convert() {
     printf(
-        "usage: mf convert text_file binary_file\n"
+        "usage: libmf convert text_file binary_file\n"
         "\n"
         "Convert a text file to a binary file\n"
     ); 

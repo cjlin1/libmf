@@ -75,7 +75,7 @@ TrainOption::TrainOption(int argc, char **argv, Model *model, Monitor *monitor) 
             model->iter = atoi(argv[++i]);
             if(model->iter<=0) { fprintf(stderr,"iterations should > 0\n"); exit(1); }
         }
-        else if(!strcmp(argv[i], "-n")) {
+        else if(!strcmp(argv[i], "-s")) {
             model->nr_thrs = atoi(argv[++i]);
             if(model->nr_thrs<=0) { fprintf(stderr,"number of threads should > 0\n"); exit(1); }
         }
@@ -157,16 +157,16 @@ TrainOption::TrainOption(int argc, char **argv, Model *model, Monitor *monitor) 
 } 
 void TrainOption::exit_train() {
     printf(
-    "usage: mf train [options] binary_train_file model\n"
+    "usage: libmf train [options] binary_train_file model\n"
     "\n"
     "options:\n" 
     "-k <dimensions>: set the number of dimensions (default 40)\n" 
     "-t <iterations>: set the number of iterations (default 40)\n" 
-    "-n <number of threads>: set the number of threads (default 4)\n" 
+    "-s <number of threads>: set the number of threads (default 4)\n" 
     "-p <cost>: set the regularization cost for P (default 1)\n" 
     "-q <cost>: set the regularization cost for Q (default 1)\n" 
-    "-bu <cost>: set the regularization cost for BU (default 1), set <0 to disable\n"
-    "-bi <cost>: set the regularization cost for BI (default 1), set <0 to disable\n"
+    "-bu <cost>: set the regularization cost for user bias (default 1), set <0 to disable\n"
+    "-bi <cost>: set the regularization cost for item bias (default 1), set <0 to disable\n"
     "-g <gamma>: set the learning rate for parallel sgd (default 0.001)\n" 
     "-v <path>: set the path to validation set\n" 
     "-gubs <user bins>: set the number of bins for parallel sgd for users (default 2 x number of threads)\n" 

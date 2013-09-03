@@ -28,7 +28,7 @@ PredictOption::~PredictOption() { delete [] dst_path; }
 
 void PredictOption::exit_predict() {
     printf(
-    "usage: mf predict binary_test_file model output\n"
+    "usage: libmf predict binary_test_file model output\n"
 	"\n"
 	"Predict a test file from a model\n"
     ); exit(1);

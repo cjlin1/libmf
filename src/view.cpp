@@ -7,7 +7,7 @@ struct ViewOption {
 };
 void ViewOption::exit_view() {
     printf(
-    "usage: mf view file\n"
+    "usage: libmf view file\n"
 	"\n"
 	"View info in a binary data or model file\n"
     ); exit(1);
