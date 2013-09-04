@@ -92,13 +92,14 @@ TrainOption::TrainOption(int argc, char **argv, Model *model, Monitor *monitor) 
             if(model->gamma<=0) { fprintf(stderr,"learning rate should > 0\n"); exit(1); }
         }
         else if(!strcmp(argv[i], "-v")) va_path = argv[++i];
-        else if(!strcmp(argv[i], "-gubs")) {
-            model->nr_gubs = atoi(argv[++i]);
-            if(model->nr_gubs<=0) { fprintf(stderr,"number of bins should > 0\n"); exit(1); }
-        }
-        else if(!strcmp(argv[i], "-gibs")) {
-            model->nr_gibs = atoi(argv[++i]);
-            if(model->nr_gibs<=0) { fprintf(stderr,"number of bins should > 0\n"); exit(1); }
+        else if(!strcmp(argv[i], "-blk")) {
+            char *p = strtok(argv[++i],"x");
+            model->nr_gubs = atoi(p);
+
+            p = strtok(NULL,"x");
+            model->nr_gibs = atoi(p);
+
+            if(model->nr_gubs<=0 || model->nr_gibs<=0) { fprintf(stderr,"number of blocks should > 0\n"); exit(1); }
         }
         else if(!strcmp(argv[i], "--rand-shuffle")) model->en_rand_shuffle = true;
         else if(!strcmp(argv[i], "--no-rand-shuffle")) model->en_rand_shuffle = false;
@@ -167,11 +168,10 @@ void TrainOption::exit_train() {
     "-q <cost>: set the regularization cost for Q (default 1)\n" 
     "-bu <cost>: set the regularization cost for user bias (default 1), set <0 to disable\n"
     "-bi <cost>: set the regularization cost for item bias (default 1), set <0 to disable\n"
-    "-g <gamma>: set the learning rate for parallel sgd (default 0.001)\n" 
+    "-g <gamma>: set the learning rate for parallel SGD (default 0.001)\n" 
     "-v <path>: set the path to validation set\n" 
-    "-gubs <user bins>: set the number of bins for parallel sgd for users (default 2 x number of threads)\n" 
-    "-gibs <item bins>: set the number of bins for parallel sgd for items (default 2 x number of threads)\n" 
-    "    For example, if you want to divide the rating matrix into 3 x 4, then use '--gubs 3 --gibs 4.'\n"
+    "-blk <blocks>: set the number of blocks for parallel SGD (default 2s x 2s)\n" 
+    "    For example, if you want 3x4 blocks, then use '-blk 3x4'\n" 
     "--rand-shuffle --no-rand-shuffle: enable / disable random suffle (default disabled)\n"
     "    This options should be used when the data is imbalanced.\n"
     "--tr-rmse --no-tr-rmse: enable / disable show rmse on training data (default disabled)\n"
