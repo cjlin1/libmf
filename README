@@ -85,14 +85,6 @@ To check the usage of each command, please run:
 
     $ ./libmf COMMAND
 
-
-Acknowledgment
-==============
-
-We thank GroupLens Research (http://www.grouplens.org) for providing us the
-data set in our example.
-
-
 Additional Information
 ======================
 [1] Y. Zhuang, W.-S. Chin, Y.-C. Juan, and C.-J. Lin.  A Fast Parallel SGD for
