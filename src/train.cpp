@@ -166,8 +166,8 @@ void TrainOption::exit_train() {
     "-s <number of threads>: set the number of threads (default 4)\n" 
     "-p <cost>: set the regularization cost for P (default 1)\n" 
     "-q <cost>: set the regularization cost for Q (default 1)\n" 
-    "-bu <cost>: set the regularization cost for user bias (default 1), set <0 to disable\n"
-    "-bi <cost>: set the regularization cost for item bias (default 1), set <0 to disable\n"
+    "-ub <cost>: set the regularization cost for user bias (default 1), set <0 to disable\n"
+    "-ib <cost>: set the regularization cost for item bias (default 1), set <0 to disable\n"
     "-g <gamma>: set the learning rate for parallel SGD (default 0.001)\n" 
     "-v <path>: set the path to validation set\n" 
     "-blk <blocks>: set the number of blocks for parallel SGD (default 2s x 2s)\n" 
@@ -442,6 +442,7 @@ void train(int argc, char **argv) {
 
     Tr = new Matrix(option->tr_path);
 
+    model->initialize(Tr);
     if(model->en_rand_shuffle) model->gen_rand_map();
 
     if(option->va_path) {
@@ -451,7 +452,6 @@ void train(int argc, char **argv) {
 
     if(Va && (Va->nr_us>Tr->nr_us || Va->nr_is>Tr->nr_is)) { fprintf(stderr, "Validation set out of range.\n"); exit(1); }
      
-    model->initialize(Tr);
     if(model->en_rand_shuffle) model->shuffle();
 
     monitor->model = model; monitor->Va = Va; monitor->scan_tr(Tr);
