@@ -1,78 +1,78 @@
-#pragma GCC diagnostic ignored "-Wunused-result" 
-#include <cstdio>
-#include <cstdlib>
-#include <cmath>
-#include <csignal>
-#include <ctime>
-#include <cstring>
-#include <climits>
-#include <cfloat>
-#include <random>
-#include <numeric>
-#include <algorithm>
-#include <thread>
+#pragma GCC diagnostic ignored "-Wunused-result"
+#include <memory>
 #include <chrono>
-#include <mutex>
 #include <vector>
-#include <pmmintrin.h>
-#include <sys/stat.h>
-#include <unistd.h>
-#include <time.h>
 
-#define DATAVER 1
-#define MODELVER 1
+#define flag { printf("LINE: %d\n", __LINE__); fflush(stdout); }
 
-#define EN_SHOW_SCHED false
-#define EN_SHOW_GRID false
-
-#define flag fprintf(stderr, "LINE: %d\n", __LINE__)
-
-enum FileType {DATA,MODEL};
-void convert(int argc, char **argv);
-void train(int argc, char **argv);
-void predict(int argc, char **argv);
-void view(int argc, char **argv);
-void exit_file_error(char *path);
-void exit_file_ver(float ver);
-struct Clock {
-    clock_t begin, end;
+class Timer
+{
+public:
+    Timer();
+    void reset();
+    void reset(std::string const &msg);
     void tic();
+    void tic(std::string const &msg);
     float toc();
+    float toc(std::string const &msg);
+private:
+    std::chrono::high_resolution_clock::time_point begin;
+    std::chrono::milliseconds duration;
 };
-struct Node {
-    int uid, iid; 
+
+struct Node
+{
+    Node() : uid(0), iid(0), rate(0) {}
+    int uid, iid;
     float rate;
 };
-struct Matrix {
+
+struct Matrix
+{
+    Matrix() : nr_us(0), nr_is(0), nr_rs(0), avg(0), R(0) {}
     int nr_us, nr_is;
     long nr_rs;
     float avg;
-    Node *M;
-    Matrix();
-    Matrix(int nr_rs, int nr_us, int nr_is, float avg);
-    Matrix(char *path);
-    Matrix(char *path, int *map_u, int *map_i);
-    void read_meta(FILE *f);
-    void read(char *path);
-    void write(char *path);
-    void sort();
-    static bool sort_uid_iid(Node lhs, Node rhs);
-    ~Matrix();
+    std::vector<Node> R;
 };
-struct Model {
-	int nr_us, nr_is, dim, dim_off, nr_thrs, iter, nr_gubs, nr_gibs, *map_uf, *map_ub, *map_if, *map_ib;
-    float *P, *Q, *UB, *IB, lp, lq, lub, lib, glp, glq, glub, glib, gamma, avg;
-    bool en_rand_shuffle, en_avg, en_ub, en_ib;
-    Model();
-    Model(char *src);
-    void initialize(Matrix *Tr);
-    void read_meta(FILE *f);
-    void read(char *path);
-    void write(char *path);
-    void gen_rand_map();
-    void shuffle();
-    void inv_shuffle();
+
+std::shared_ptr<Matrix> read_matrix_meta(FILE *f);
+
+std::shared_ptr<Matrix> read_matrix_meta(std::string const &path);
+
+std::shared_ptr<Matrix> read_matrix(std::string const &path);
+
+bool write_matrix(Matrix const &M, std::string const &path);
+
+struct Parameter
+{
+    Parameter() : dim(40), lp(1), lq(1), lub(-1), lib(-1), gamma(0.001) {}
+    int dim;
+    float lp, lq, lub, lib, gamma;
+};
+
+struct Model
+{
+    Model() : param(), nr_us(0), nr_is(0), avg(0), P(nullptr), Q(nullptr),
+              UB(0), IB(0) {}
+    Parameter param;
+    int nr_us, nr_is;
+    float avg;
+    float *P, *Q;
+    std::vector<float> UB, IB;
     ~Model();
 };
-float calc_rate(Model *model, Node *r);
-float calc_rmse(Model *model, Matrix *R);
+
+std::shared_ptr<Model> read_model_meta(FILE *f);
+
+std::shared_ptr<Model> read_model_meta(std::string const &path);
+
+std::shared_ptr<Model> read_model(std::string const &path);
+
+bool write_model(Model const &model, std::string const &path);
+
+float calc_rate(Model const &model, Node const &r);
+
+float calc_rmse(Model const &model, Matrix const &M);
+
+int get_aligned_dim(int const dim);

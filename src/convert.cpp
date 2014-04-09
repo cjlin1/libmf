@@ -1,66 +1,99 @@
+#include <string>
+#include <iostream>
+#include <cstring>
 #include "mf.h"
 
-struct ConvertOption {
-    char *src, *dst;
-    ConvertOption(int argc, char **argv);	
-    static void exit_convert();
-    ~ConvertOption();
+namespace 
+{
+
+struct ConvertOption
+{
+    std::string text_path, binary_path;
 };
-ConvertOption::ConvertOption(int argc, char **argv) {
-    if(argc!=3 && argc!=4) exit_convert();
 
-    src = argv[2];
-    if(argc==4) {
-        dst = new char[strlen(argv[3])+1];
-        sprintf(dst,"%s",argv[3]); 
-    }
-    else {
-		char *p = strrchr(argv[2],'/');
-		if(p==NULL) p = argv[2];
-		else p++;
-        dst = new char[strlen(p)+5];
-		sprintf(dst,"%s.bin",p);
-    }
-}
-void ConvertOption::exit_convert() {
-    printf(
-        "usage: libmf convert text_file binary_file\n"
-        "\n"
-        "Convert a text file to a binary file\n"
-    ); 
-    exit(1);
-}
-ConvertOption::~ConvertOption() { delete[] dst; }
-
-void convert(char *src_path, char *dst_path) {
-    printf("Converting %s... ", src_path); fflush(stdout);
-    Clock clock; clock.tic();
-
-    int uid, iid, nr_us=0, nr_is=0, nr_rs; float rate; double sum = 0;
-    FILE *f = fopen(src_path, "r"); if(!f) exit_file_error(src_path);
-    std::vector<Node> rs; 
-
-    while(fscanf(f,"%d %d %f\n",&uid,&iid,&rate)!=EOF) {
-        if(uid+1>nr_us) nr_us = uid+1; if(iid+1>nr_is) nr_is = iid+1; sum += rate;
-        Node r; r.uid=uid, r.iid=iid, r.rate=rate; rs.push_back(r);
-    }
-    nr_rs = rs.size(); fclose(f);
-
-    Matrix *R = new Matrix(nr_rs,nr_us,nr_is,sum/nr_rs);
-
-    for(auto it=rs.begin(); it!=rs.end(); it++) R->M[it-rs.begin()] = (*it); 
-
-    printf("done. %.2f\n", clock.toc()); fflush(stdout);
-
-    R->write(dst_path);
-
-    delete R;
+void convert_help()
+{
+    printf("usage: libmf convert text_file [binary_file]\n");
 }
 
-void convert(int argc, char **argv) {
-    ConvertOption *option = new ConvertOption(argc,argv);
+std::shared_ptr<ConvertOption> parse_convert_option(
+        int const argc, char const * const * const argv)
+{
+    if((argc != 1) && (argc != 2))
+    {
+        convert_help();
+        return std::shared_ptr<ConvertOption>(nullptr);
+    }
 
-    convert(option->src,option->dst);
+    std::shared_ptr<ConvertOption> option(new ConvertOption);
 
-    delete option;
+    option->text_path = std::string(argv[0]);
+    if(argc == 2)
+    {
+        option->binary_path = std::string(argv[1]);
+    }
+    else
+    {
+        const char *p = strrchr(argv[0], '/');
+        if(!p)
+            p = argv[0];
+        else
+            p++;
+        option->binary_path = std::string(p) + ".bin";
+    }
+    return option;
+}
+
+bool convert(std::string const &text_path, std::string const &binary_path)
+{
+    FILE *f = fopen(text_path.c_str(), "r");
+    if(!f)
+    {
+        fprintf(stderr, "\nError: Cannot open %s.", text_path.c_str());
+        return false;
+    }
+    Timer timer;
+    timer.tic("Converting...");
+
+    Matrix M;
+    double sum = 0;
+    while(true)
+    {
+        Node r;
+        if(fscanf(f, "%d %d %f\n", &r.uid, &r.iid, &r.rate) == EOF)
+            break;
+        if(r.uid < 0 || r.iid <0)
+        {
+            fprintf(stderr, "\nError: User ID and Item ID should not be smaller than zero.\n");
+            return false;
+        }
+        if(r.uid+1 > M.nr_us)
+            M.nr_us = r.uid+1;
+        if(r.iid+1 > M.nr_is)
+            M.nr_is = r.iid+1;
+        sum += r.rate;
+        M.R.push_back(r);
+    }
+    M.nr_rs = (long)(M.R.size());
+    M.avg = (float)(sum/M.nr_rs);
+
+    timer.toc("done.");
+    if(!write_matrix(M, binary_path))
+        return false;
+    fclose(f);
+    return true;
+}
+
+} // namespace
+
+int convert(int const argc, const char * const * const argv)
+{
+    std::shared_ptr<ConvertOption> option = parse_convert_option(argc, argv);
+    if(!option)
+        return EXIT_FAILURE;
+
+    if(!convert(option->text_path, option->binary_path))
+        return EXIT_FAILURE;
+
+    return EXIT_SUCCESS;
 }

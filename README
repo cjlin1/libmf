@@ -15,7 +15,7 @@ Table of Contents
 Installation and Data Format
 ============================
 
-LIBMF requires Unix systems and g++ 4.6 or higher.
+LIBMF requires Unix systems and g++ with C++11 support.
 
 On Unix systems, type
 
@@ -70,20 +70,39 @@ Finally, we use the model to predict the binary test file.
 Formulation
 ===========
 
-For the detail of how we solve the above problem, please check Appendix A in [1].
+For the detail of the formulation we solve, please check Appendix A in [1].
 
 
 Usage
 =====
 
-There are five commands in LIBMF: convert, train, predict, and view. You
+There are four commands in LIBMF: convert, train, predict, and view. You
 can check the instruction of these commands by running:
 
     $ ./libmf
 
 To check the usage of each command, please run:
 
-    $ ./libmf COMMAND
+    $ ./libmf <command>
+
+
+Miscellaneous
+=============
+
+1. LIBMF uses SSE instructions to accelerate computation. If you cannot use SSE
+   on your platform, then please uncomment 
+   
+       DFLAG = "-DNOSSE"
+
+   in the Makefile to use the no-sse version.
+
+2. Some modern CPUs supports AVX, which is more powerful than SSE. To enable
+   AVX, please uncomment
+   
+       DFLAG = "-DUSEAVX"
+       CFLAGS += -mavx
+
+   in the Makefile.
 
 Additional Information
 ======================
