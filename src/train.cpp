@@ -24,7 +24,7 @@
 #include <immintrin.h>
 #endif
 
-namespace 
+namespace
 {
 
 struct TrainOption
@@ -32,7 +32,8 @@ struct TrainOption
     TrainOption()
         : tr_path(), va_path(), model_path(), show_tr_rmse(false),
           show_obj(false), rand_shuffle(true), use_avg(false),
-          param(), nr_user_blocks(1), nr_item_blocks(1), nr_threads(1), nr_iters(40) {}
+          param(), nr_user_blocks(1), nr_item_blocks(1), nr_threads(1),
+          nr_iters(40) {}
     std::string tr_path, va_path, model_path;
     bool show_tr_rmse, show_obj, rand_shuffle, use_avg;
     Parameter param;
@@ -284,8 +285,10 @@ Model generate_initial_model(Parameter const &param, int const nr_users,
     model.nr_users = nr_users;
     model.nr_items = nr_items;
     model.avg = avg;
-    posix_memalign((void**)&model.P, 32, model.nr_users*dim_aligned*sizeof(float));
-    posix_memalign((void**)&model.Q, 32, model.nr_items*dim_aligned*sizeof(float));
+    posix_memalign((void**)&model.P, 32,
+                   model.nr_users*dim_aligned*sizeof(float));
+    posix_memalign((void**)&model.Q, 32,
+                   model.nr_items*dim_aligned*sizeof(float));
 
     auto initialize = [&] (float *ptr, int const count)
     {
@@ -379,7 +382,7 @@ void Monitor::print(int const iter, float const time, double const loss,
         sprintf(output+strlen(output), " %13.3e %13.3e %13.3e", loss, reg,
                 loss+reg);
     }
-    printf("%s\n", output); 
+    printf("%s\n", output);
     fflush(stdout);
 }
 
@@ -394,7 +397,7 @@ double Monitor::calc_reg()
         for(int u = 0; u < model->nr_users; u++)
         {
             float * const p = P+u*dim_aligned;
-            reg_p += nr_ratings_per_user[u] * 
+            reg_p += nr_ratings_per_user[u] *
                      std::inner_product(p, p+model->param.dim, p, 0.0);
         }
         reg += reg_p*model->param.lp;
@@ -501,13 +504,16 @@ std::shared_ptr<GriddedMatrix> read_gridded_matrix(
         thread.join();
     */
 
-    int const seg_u = (int)ceil((double)Tr_meta->nr_users/option.nr_user_blocks);
-    int const seg_i = (int)ceil((double)Tr_meta->nr_items/option.nr_item_blocks);
+    int const seg_u = (int)ceil((double)Tr_meta->nr_users /
+                                option.nr_user_blocks);
+    int const seg_i = (int)ceil((double)Tr_meta->nr_items /
+                                option.nr_item_blocks);
     for(auto &buffer : buffers)
     {
         for(auto &node : buffer)
         {
-            int const bid = (node.uid/seg_u)*option.nr_item_blocks+node.iid/seg_i;
+            int const bid = (node.uid/seg_u) * option.nr_item_blocks +
+                            node.iid/seg_i;
             Tr->GM[bid].R.push_back(node);
         }
         buffer.clear();
@@ -525,7 +531,8 @@ std::shared_ptr<GriddedMatrix> read_gridded_matrix(
 class Scheduler
 {
 public:
-    Scheduler(int const nr_user_blocks, int const nr_item_blocks, int const nr_threads);
+    Scheduler(int const nr_user_blocks, int const nr_item_blocks,
+              int const nr_threads);
     int get_job();
     void put_job(int const jid, double const loss);
     double get_loss();
@@ -546,11 +553,13 @@ private:
     std::condition_variable cond_var;
 };
 
-Scheduler::Scheduler(int const nr_user_blocks, int const nr_item_blocks, int const nr_threads)
-        : nr_user_blocks(nr_user_blocks), nr_item_blocks(nr_item_blocks), nr_blocks(nr_user_blocks*nr_item_blocks),
-          nr_threads(nr_threads), total_jobs(0), nr_paused_thrs(0), 
-          paused(false), terminated(false), counts(nr_blocks, 0), 
-          order_u(nr_user_blocks, 0), order_i(nr_item_blocks, 0), blocked_u(nr_user_blocks, 0), 
+Scheduler::Scheduler(int const nr_user_blocks, int const nr_item_blocks,
+                     int const nr_threads)
+        : nr_user_blocks(nr_user_blocks), nr_item_blocks(nr_item_blocks),
+          nr_blocks(nr_user_blocks*nr_item_blocks), nr_threads(nr_threads),
+          total_jobs(0), nr_paused_thrs(0), paused(false), terminated(false),
+          counts(nr_blocks, 0), order_u(nr_user_blocks, 0),
+          order_i(nr_item_blocks, 0), blocked_u(nr_user_blocks, 0),
           blocked_i(nr_item_blocks, 0), losses(nr_blocks, 0)
 {
     for(int u = 0; u < nr_user_blocks; u++)
@@ -920,7 +929,8 @@ void sgd(GriddedMatrix const * const Tr, Model * const model,
 #endif
 }
 
-Model fpsgd(GriddedMatrix const &Tr, Matrix const &Va, TrainOption const &option)
+Model fpsgd(GriddedMatrix const &Tr, Matrix const &Va,
+            TrainOption const &option)
 {
     Timer timer;
     timer.reset("Initializing model...");
@@ -931,7 +941,8 @@ Model fpsgd(GriddedMatrix const &Tr, Matrix const &Va, TrainOption const &option
     Monitor monitor(Tr, &Va, &model, option.show_tr_rmse,
                     option.show_obj);
 
-    Scheduler scheduler(option.nr_user_blocks, option.nr_item_blocks, option.nr_threads);
+    Scheduler scheduler(option.nr_user_blocks, option.nr_item_blocks,
+                        option.nr_threads);
     std::vector<std::thread> threads;
     for(int tx = 0; tx < option.nr_threads; tx++)
         threads.push_back(std::thread(sgd, &Tr, &model, &scheduler));
@@ -940,7 +951,8 @@ Model fpsgd(GriddedMatrix const &Tr, Matrix const &Va, TrainOption const &option
     timer.reset();
     for(int iter = 1; iter <= option.nr_iters; iter++)
     {
-        scheduler.wait_for_jobs_done(iter*option.nr_user_blocks*option.nr_item_blocks);
+        scheduler.wait_for_jobs_done(iter * option.nr_user_blocks *
+                                     option.nr_item_blocks);
         scheduler.pause();
         float const iter_time = timer.toc();
         double const loss = scheduler.get_loss();
@@ -1001,7 +1013,7 @@ int train(int const argc, char const * const * const argv)
     printf("Warning: AVX is enabled.\n");
 #endif
 
-    std::shared_ptr<const TrainOption> const 
+    std::shared_ptr<const TrainOption> const
         option = parse_train_option(argc, argv);
     if (!option)
         return EXIT_FAILURE;

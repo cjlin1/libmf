@@ -3,7 +3,7 @@
 #include <cstring>
 #include "mf.h"
 
-namespace 
+namespace
 {
 
 enum FileType {kData, kModel};
@@ -23,7 +23,8 @@ void view_help()
     );
 }
 
-std::shared_ptr<ViewOption> parse_view_option(int const argc, char const * const * const argv)
+std::shared_ptr<ViewOption> parse_view_option(
+        int const argc, char const * const * const argv)
 {
     if(argc != 2)
     {
