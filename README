@@ -96,7 +96,7 @@ Miscellaneous
 
    in the Makefile to use the no-sse version.
 
-2. Some modern CPUs supports AVX, which is more powerful than SSE. To enable
+2. Some modern CPUs support AVX, which is more powerful than SSE. To enable
    AVX, please uncomment
    
        DFLAG = "-DUSEAVX"
@@ -106,10 +106,9 @@ Miscellaneous
 
 Additional Information
 ======================
-[1] Y. Zhuang, W.-S. Chin, Y.-C. Juan, and C.-J. Lin.  A Fast Parallel SGD for
-Matrix Factorization in Shared Memory Systems. Proceedings of ACM Recommender
-Systems 2013.
-www.csie.ntu.edu.tw/~cjlin/papers/libmf.pdf
+[1] W.-S. Chin, Y. Zhuang, Y.-C. Juan, and C.-J. Lin. A Fast Parallel SGD for
+Matrix Factorization in Shared Memory Systems.
+www.csie.ntu.edu.tw/~cjlin/papers/libmf/libmf_journal.pdf
 
 For any questions and comments, please email
 cjlin@csie.ntu.edu.tw

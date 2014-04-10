@@ -55,9 +55,9 @@ bool view_data(std::string const &path)
     std::shared_ptr<Matrix> M = read_matrix_meta(path);
     if(!M)
         return false;
-    printf("number of users   = %d\n", M->nr_us);
-    printf("number of items   = %d\n", M->nr_is);
-    printf("number of ratings = %ld\n", M->nr_rs);
+    printf("number of users   = %d\n", M->nr_users);
+    printf("number of items   = %d\n", M->nr_items);
+    printf("number of ratings = %ld\n", M->nr_ratings);
     printf("average           = %f\n", M->avg);
     return true;
 }
@@ -67,8 +67,8 @@ bool view_model(std::string const &path)
     std::shared_ptr<Model> model = read_model_meta(path);
     if(!model)
         return false;
-    printf("number of users = %d\n", model->nr_us);
-    printf("number of items = %d\n", model->nr_is);
+    printf("number of users = %d\n", model->nr_users);
+    printf("number of items = %d\n", model->nr_items);
     printf("dimensions      = %d\n", model->param.dim);
     printf("lambda p        = %f\n", model->param.lp);
     printf("lambda q        = %f\n", model->param.lq);

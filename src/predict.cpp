@@ -67,16 +67,16 @@ bool predict(std::string const test_path, std::string const model_path,
     timer.tic("Predicting...");
 
     double loss = 0;
-    for(long rx = 0; rx < Te->nr_rs; rx++)
+    for(long r = 0; r < Te->nr_ratings; r++)
     {
-        float const rate = calc_rate(*model, Te->R[rx]);
+        float const rate = calc_rate(*model, Te->R[r]);
         fprintf(f, "%f\n", rate);
-        float const e = Te->R[rx].rate - rate;
+        float const e = Te->R[r].rate - rate;
         loss += e*e;
     }
     timer.toc("done.");
 
-    printf("RMSE: %.3f\n", sqrt(loss/Te->nr_rs));
+    printf("RMSE: %.3f\n", sqrt(loss/Te->nr_ratings));
     fclose(f);
 
     return true;

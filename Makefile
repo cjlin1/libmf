@@ -8,10 +8,10 @@ OBJ = mf.o convert.o train.o predict.o view.o
 
 all: libmf
 
-%.o: src/%.cpp src/%.h
+%.o: src/%.cpp src/mf.h
 	$(CXX) $(CFLAGS) $(DFLAG) -c -o $@ $<
 
-libmf: $(OBJ) src/main.cpp
+libmf: $(OBJ) src/main.cpp src/mf.h
 	$(CXX) $(CFLAGS) -o libmf $^
 
 clean:

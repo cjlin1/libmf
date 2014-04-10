@@ -1,10 +1,6 @@
 #include <iostream>
 #include <cstring>
 #include "mf.h"
-#include "convert.h"
-#include "train.h"
-#include "predict.h"
-#include "view.h"
 
 namespace 
 {

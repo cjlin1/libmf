@@ -29,9 +29,9 @@ struct Node
 
 struct Matrix
 {
-    Matrix() : nr_us(0), nr_is(0), nr_rs(0), avg(0), R(0) {}
-    int nr_us, nr_is;
-    long nr_rs;
+    Matrix() : nr_users(0), nr_items(0), nr_ratings(0), avg(0), R(0) {}
+    int nr_users, nr_items;
+    long nr_ratings;
     float avg;
     std::vector<Node> R;
 };
@@ -53,10 +53,10 @@ struct Parameter
 
 struct Model
 {
-    Model() : param(), nr_us(0), nr_is(0), avg(0), P(nullptr), Q(nullptr),
+    Model() : param(), nr_users(0), nr_items(0), avg(0), P(nullptr), Q(nullptr),
               UB(0), IB(0) {}
     Parameter param;
-    int nr_us, nr_is;
+    int nr_users, nr_items;
     float avg;
     float *P, *Q;
     std::vector<float> UB, IB;
@@ -76,3 +76,11 @@ float calc_rate(Model const &model, Node const &r);
 float calc_rmse(Model const &model, Matrix const &M);
 
 int get_aligned_dim(int const dim);
+
+int convert(int const argc, char const * const * const argv);
+
+int train(int const argc, char const * const * const argv);
+
+int predict(int const argc, char const * const * const argv);
+
+int view(int const argc, char const * const * const argv);

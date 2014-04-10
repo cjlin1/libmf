@@ -67,15 +67,15 @@ bool convert(std::string const &text_path, std::string const &binary_path)
             fprintf(stderr, "\nError: User ID and Item ID should not be smaller than zero.\n");
             return false;
         }
-        if(r.uid+1 > M.nr_us)
-            M.nr_us = r.uid+1;
-        if(r.iid+1 > M.nr_is)
-            M.nr_is = r.iid+1;
+        if(r.uid+1 > M.nr_users)
+            M.nr_users = r.uid+1;
+        if(r.iid+1 > M.nr_items)
+            M.nr_items = r.iid+1;
         sum += r.rate;
         M.R.push_back(r);
     }
-    M.nr_rs = (long)(M.R.size());
-    M.avg = (float)(sum/M.nr_rs);
+    M.nr_ratings = (long)(M.R.size());
+    M.avg = (float)(sum/M.nr_ratings);
 
     timer.toc("done.");
     if(!write_matrix(M, binary_path))

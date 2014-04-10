@@ -52,9 +52,9 @@ float Timer::toc(std::string const &msg)
 std::shared_ptr<Matrix> read_matrix_meta(FILE *f)
 {
     std::shared_ptr<Matrix> M(new Matrix);
-    fread(&M->nr_us, sizeof(int), 1, f);
-    fread(&M->nr_is, sizeof(int), 1, f);
-    fread(&M->nr_rs, sizeof(long), 1, f);
+    fread(&M->nr_users, sizeof(int), 1, f);
+    fread(&M->nr_items, sizeof(int), 1, f);
+    fread(&M->nr_ratings, sizeof(long), 1, f);
     fread(&M->avg, sizeof(float), 1, f);
     return M;
 }
@@ -81,8 +81,8 @@ std::shared_ptr<Matrix> read_matrix(std::string const &path)
         return std::shared_ptr<Matrix>(nullptr);
     }
     std::shared_ptr<Matrix> M = read_matrix_meta(f);
-    M->R.resize(M->nr_rs);
-    fread(M->R.data(), sizeof(Node), M->nr_rs, f);
+    M->R.resize(M->nr_ratings);
+    fread(M->R.data(), sizeof(Node), M->nr_ratings, f);
     fclose(f);
     return M;
 }
@@ -95,11 +95,11 @@ bool write_matrix(Matrix const &M, std::string const &path)
         fprintf(stderr, "\nError: Cannot open %s.\n", path.c_str());
         return false;
     }
-    fwrite(&M.nr_us, sizeof(int), 1, f);
-    fwrite(&M.nr_is, sizeof(int), 1, f);
-    fwrite(&M.nr_rs, sizeof(long), 1, f);
+    fwrite(&M.nr_users, sizeof(int), 1, f);
+    fwrite(&M.nr_items, sizeof(int), 1, f);
+    fwrite(&M.nr_ratings, sizeof(long), 1, f);
     fwrite(&M.avg, sizeof(float), 1, f);
-    fwrite(M.R.data(), sizeof(Node), M.nr_rs, f);
+    fwrite(M.R.data(), sizeof(Node), M.nr_ratings, f);
     fclose(f);
     return true;
 }
@@ -116,8 +116,8 @@ std::shared_ptr<Model> read_model_meta(FILE *f)
 {
     std::shared_ptr<Model> model(new Model);
     fread(&model->param, sizeof(Parameter), 1, f);
-    fread(&model->nr_us, sizeof(int), 1, f);
-    fread(&model->nr_is, sizeof(int), 1, f);
+    fread(&model->nr_users, sizeof(int), 1, f);
+    fread(&model->nr_items, sizeof(int), 1, f);
     fread(&model->avg, sizeof(float), 1, f);
     return model;
 }
@@ -148,23 +148,23 @@ std::shared_ptr<Model> read_model(std::string const &path)
     int const dim_aligned = get_aligned_dim(model->param.dim);
 
     posix_memalign((void**)&model->P, 32,
-                   model->nr_us*dim_aligned*sizeof(float));
-    fread(model->P, sizeof(float), model->nr_us*dim_aligned, f);
+                   model->nr_users*dim_aligned*sizeof(float));
+    fread(model->P, sizeof(float), model->nr_users*dim_aligned, f);
 
     posix_memalign((void**)&model->Q, 32,
-                   model->nr_is*dim_aligned*sizeof(float));
-    fread(model->Q, sizeof(float), model->nr_is*dim_aligned, f);
+                   model->nr_items*dim_aligned*sizeof(float));
+    fread(model->Q, sizeof(float), model->nr_items*dim_aligned, f);
 
     if(model->param.lub >= 0)
     {
-        model->UB.resize(model->nr_us);
-        fread(model->UB.data(), sizeof(float), model->nr_us, f);
+        model->UB.resize(model->nr_users);
+        fread(model->UB.data(), sizeof(float), model->nr_users, f);
     }
 
     if(model->param.lib >= 0)
     {
-        model->IB.resize(model->nr_is);
-        fread(model->IB.data(), sizeof(float), model->nr_is, f);
+        model->IB.resize(model->nr_items);
+        fread(model->IB.data(), sizeof(float), model->nr_items, f);
     }
 
     fclose(f);
@@ -181,15 +181,15 @@ bool write_model(Model const &model, std::string const &path)
     }
     int const dim_aligned = get_aligned_dim(model.param.dim);
     fwrite(&model.param, sizeof(Parameter), 1, f);
-    fwrite(&model.nr_us, sizeof(int), 1, f);
-    fwrite(&model.nr_is, sizeof(int), 1, f);
+    fwrite(&model.nr_users, sizeof(int), 1, f);
+    fwrite(&model.nr_items, sizeof(int), 1, f);
     fwrite(&model.avg, sizeof(float), 1, f);
-    fwrite(model.P, sizeof(float), model.nr_us*dim_aligned, f);
-    fwrite(model.Q, sizeof(float), model.nr_is*dim_aligned, f);
+    fwrite(model.P, sizeof(float), model.nr_users*dim_aligned, f);
+    fwrite(model.Q, sizeof(float), model.nr_items*dim_aligned, f);
     if(model.param.lub >= 0)
-        fwrite(model.UB.data(), sizeof(float), model.nr_us, f);
+        fwrite(model.UB.data(), sizeof(float), model.nr_users, f);
     if(model.param.lib >= 0)
-        fwrite(model.IB.data(), sizeof(float), model.nr_is, f);
+        fwrite(model.IB.data(), sizeof(float), model.nr_items, f);
     fclose(f);
     return true;
 }
@@ -218,7 +218,7 @@ float calc_rmse(Model const &model, Matrix const &M)
         float const e = r->rate - calc_rate(model, *r);
         loss += e*e;
     }
-    return sqrt(loss/M.nr_rs);
+    return sqrt(loss/M.nr_ratings);
 }
 
 int get_aligned_dim(int const dim)
