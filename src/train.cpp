@@ -741,7 +741,7 @@ void sgd(GriddedMatrix const * const Tr, Model * const model,
             break;
     }
 #elif defined USEAVX
-    // This code block may not be easy to read because we implemnent a trick
+    // This code block may not be easy to read because we implement a trick
     // here. Given two consequent ratings, if they are rated by the same user,
     // then we can reduce one memory access to p. For example, r1 is the rating
     // of item 3 by user 9, and r2 is the rating of item 7 by user 9. When we
