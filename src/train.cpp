@@ -685,11 +685,11 @@ void sgd(GriddedMatrix const * const Tr, Model * const model,
     int const dim_aligned = get_aligned_dim(model->param.dim);
     bool const en_ub = (model->param.lub >= 0);
     bool const en_ib = (model->param.lib >= 0);
-    float const glp = 1 - model->param.gamma*(model->param.lp);
-    float const glq = 1 - model->param.gamma*(model->param.lq);
-    float const glub = 1 - model->param.gamma*(model->param.lub);
-    float const glib = 1 - model->param.gamma*(model->param.lib);
     float const gamma = model->param.gamma;
+    float const glp = 1 - gamma*(model->param.lp);
+    float const glq = 1 - gamma*(model->param.lq);
+    float const glub = 1 - gamma*(model->param.lub);
+    float const glib = 1 - gamma*(model->param.lib);
     float const avg = model->avg;
 
     float *const P = model->P;
@@ -698,6 +698,9 @@ void sgd(GriddedMatrix const * const Tr, Model * const model,
     float *const IB = model->IB.data();
 
 #if defined NOSSE
+    // If you would like to trace LIBMF code, you may want to trace NOSSE
+    // version first because it is much more readable than SSE and AVX version.
+
     int const dim = model->param.dim;
     while(true)
     {
@@ -709,20 +712,19 @@ void sgd(GriddedMatrix const * const Tr, Model * const model,
         {
             p = P + r->uid*dim_aligned;
             q = Q + r->iid*dim_aligned;
-            float ge = std::inner_product(p, p+dim_aligned, q, 0.0) + avg;
+            float error = r->rate - std::inner_product(p, p+dim_aligned, q, 0.0) - avg;
             if (en_ub)
             {
                 ub = UB + r->uid;
-                ge += (*ub);
+                error -= (*ub);
             }
             if (en_ib)
             {
                 ib = IB + r->iid;
-                ge += (*ib);
+                error -= (*ib);
             }
-            ge = r->rate - ge;
-            loss += ge*ge;
-            ge *= gamma;
+            loss += error*error;
+            float ge = gamma*error;
             for(int d = 0; d < dim; d++)
             {
                 float const tmp = p[d];
@@ -739,6 +741,14 @@ void sgd(GriddedMatrix const * const Tr, Model * const model,
             break;
     }
 #elif defined USEAVX
+    // This code block may not be easy to read because we implemnent a trick
+    // here. Given two consequent ratings, if they are rated by the same user,
+    // then we can reduce one memory access to p. For example, r1 is the rating
+    // of item 3 by user 9, and r2 is the rating of item 7 by user 9. When we
+    // are updating p9 and q3, we can evaluate p9Tq7 at the cost of only
+    // loading q7 into the register because p9 is already in the register. (In
+    // the general case we need to load both p9 and q7.)
+
     __m256 const XMMglp = _mm256_broadcast_ss(&glp);
     __m256 const XMMglq = _mm256_broadcast_ss(&glq);
     __m256 const XMMglub = _mm256_broadcast_ss(&glub);
@@ -754,15 +764,12 @@ void sgd(GriddedMatrix const * const Tr, Model * const model,
         Node const *r;
         float *p, *q, *ub, *ib;
         __m128d XMMloss = _mm_setzero_pd();
-        __m256 XMMr;
         __m256 XMMge = _mm256_setzero_ps();;
         if(nr_ratings > 0)
         {
             r = M->R.data();
             p = P + r->uid*dim_aligned;
             q = Q + r->iid*dim_aligned;
-
-            XMMr = _mm256_broadcast_ss(&r->rate);
 
             for(int d = 0; d < dim_aligned; d += 8)
                 XMMge = _mm256_add_ps(XMMge, _mm256_mul_ps(
@@ -793,7 +800,8 @@ void sgd(GriddedMatrix const * const Tr, Model * const model,
                 XMMge = _mm256_add_ps(XMMge, XMMib);
             }
 
-            XMMge = _mm256_sub_ps(XMMr, _mm256_add_ps(XMMge, XMMavg));
+            XMMge = _mm256_sub_ps(_mm256_broadcast_ss(&r->rate), 
+                                  _mm256_add_ps(XMMge, XMMavg));
             XMMloss = _mm_add_pd(XMMloss, _mm_cvtps_pd(_mm256_castps256_ps128(
                                  _mm256_mul_ps(XMMge, XMMge))));
             XMMge = _mm256_mul_ps(XMMge, XMMg);
@@ -853,7 +861,6 @@ void sgd(GriddedMatrix const * const Tr, Model * const model,
                                                      _mm256_load_ps(q+d)));
             }
             r = r_next;
-            XMMr = _mm256_broadcast_ss(&r->rate);
         }
         double loss = 0;
         _mm_store_sd(&loss, XMMloss);
@@ -876,10 +883,10 @@ void sgd(GriddedMatrix const * const Tr, Model * const model,
         float *p, *q, *ub, *ib;
         for(long mx = 0; mx < Tr->GM[jid].nr_ratings; mx++, r++)
         {
-            __m128 const XMMr = _mm_load1_ps(&r->rate);
             __m128 XMMge = _mm_setzero_ps();
             p = P + r->uid*dim_aligned;
             q = Q + r->iid*dim_aligned;
+            // XMMge = pTq
             for(int d = 0; d < dim_aligned; d += 4)
                 XMMge = _mm_add_ps(XMMge, _mm_mul_ps(_mm_load_ps(p+d),
                                                      _mm_load_ps(q+d)));
@@ -890,6 +897,7 @@ void sgd(GriddedMatrix const * const Tr, Model * const model,
             {
                 ub = UB + r->uid;
                 XMMub = _mm_load1_ps(ub);
+                // XMMge = pTq + ub
                 XMMge = _mm_add_ps(XMMge, XMMub);
             }
             __m128 XMMib;
@@ -897,12 +905,18 @@ void sgd(GriddedMatrix const * const Tr, Model * const model,
             {
                 ib = IB + r->iid;
                 XMMib = _mm_load1_ps(ib);
+                // XMMge = pTq + ub + ib
                 XMMge = _mm_add_ps(XMMge, XMMib);
             }
-            XMMge = _mm_sub_ps(XMMr, _mm_add_ps(XMMge, XMMavg));
+            // XMMge = error = rate - (pTq + ub + ib + avg)
+            XMMge = _mm_sub_ps(_mm_load1_ps(&r->rate), 
+                               _mm_add_ps(XMMge, XMMavg));
+            // loss += error*error
             XMMloss = _mm_add_pd(XMMloss, _mm_cvtps_pd(_mm_mul_ps(XMMge,
                                                                   XMMge)));
+            // XMMge = gamma*error
             XMMge = _mm_mul_ps(XMMge, XMMg);
+            // update p and q
             for(int d = 0; d < dim_aligned; d += 4)
             {
                 __m128 XMMp = _mm_load_ps(p+d);
@@ -915,6 +929,7 @@ void sgd(GriddedMatrix const * const Tr, Model * const model,
                 _mm_store_ps(p+d, XMMp);
                 _mm_store_ps(q+d, XMMq);
             }
+            // update ub and ib
             if(en_ub)
                 _mm_store_ss(ub, _mm_add_ps(XMMge, _mm_mul_ps(XMMglub, XMMub)));
             if(en_ib)
