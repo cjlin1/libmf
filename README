@@ -106,8 +106,8 @@ Miscellaneous
 
 Additional Information
 ======================
-[1] W.-S. Chin, Y. Zhuang, Y.-C. Juan, and C.-J. Lin. A Fast Parallel SGD for
-Matrix Factorization in Shared Memory Systems.
+[1] W.-S. Chin, Y. Zhuang, Y.-C. Juan, and C.-J. Lin. A Fast Parallel
+Stochastic Gradient Method for Matrix Factorization in Shared Memory Systems
 www.csie.ntu.edu.tw/~cjlin/papers/libmf/libmf_journal.pdf
 
 For any questions and comments, please email

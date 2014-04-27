@@ -53,10 +53,10 @@ void train_help()
     "-q <cost>: set the regularization cost for Q (default 1)\n"
     "-ub <cost>: set the regularization cost for user bias. Set <0 to disable. (default -1)\n"
     "-ib <cost>: set the regularization cost for item bias. Set <0 to disable. (default -1)\n"
-    "-g <gamma>: set the learning rate for parallel SGD (default 0.001)\n"
+    "-g <gamma>: set the learning rate for parallel SG (default 0.001)\n"
     "-v <path>: set the path to validation set\n"
     "    This option may slow down the training procedure.\n"
-    "-blk <blocks>: set the number of blocks for parallel SGD (default 2 threads x 2 threads)\n"
+    "-blk <blocks>: set the number of blocks for parallel SG (default 2 threads x 2 threads)\n"
     "    For example, if you want 3x4 blocks, then use '-blk 3x4'.\n"
     "--rand-shuffle --no-rand-shuffle: enable/disable random suffle (default enabled)\n"
     "    This options should be used when the data is imbalanced.\n"
@@ -679,7 +679,7 @@ bool Scheduler::is_terminated()
     return terminated;
 }
 
-void sgd(GriddedMatrix const * const Tr, Model * const model,
+void sg(GriddedMatrix const * const Tr, Model * const model,
          Scheduler * const scheduler)
 {
     int const dim_aligned = get_aligned_dim(model->param.dim);
@@ -944,7 +944,7 @@ void sgd(GriddedMatrix const * const Tr, Model * const model,
 #endif
 }
 
-Model fpsgd(GriddedMatrix const &Tr, Matrix const &Va,
+Model fpsg(GriddedMatrix const &Tr, Matrix const &Va,
             TrainOption const &option)
 {
     Timer timer;
@@ -960,7 +960,7 @@ Model fpsgd(GriddedMatrix const &Tr, Matrix const &Va,
                         option.nr_threads);
     std::vector<std::thread> threads;
     for(int tx = 0; tx < option.nr_threads; tx++)
-        threads.push_back(std::thread(sgd, &Tr, &model, &scheduler));
+        threads.push_back(std::thread(sg, &Tr, &model, &scheduler));
     monitor.print_header();
 
     timer.reset();
@@ -1072,7 +1072,7 @@ int train(int const argc, char const * const * const argv)
         }
     }
 
-    Model model = fpsgd(*Tr, *Va, *option);
+    Model model = fpsg(*Tr, *Va, *option);
 
     if(option->rand_shuffle)
         inversely_shuffle_model(model, user_map, item_map);
