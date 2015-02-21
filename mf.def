@@ -1,0 +1,10 @@
+LIBRARY mf
+EXPORTS
+    mf_get_default_param    @1
+    mf_save_model    @2
+    mf_load_model    @3
+    mf_destroy_model    @4
+    mf_train    @5
+    mf_train_with_validation  @6
+    mf_cross_validation  @7
+    mf_predict    @8

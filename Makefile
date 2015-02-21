@@ -1,18 +1,33 @@
-.SUFFIXES: .o .cpp .h
 CXX = g++
-CFLAGS := -O3 -pthread -std=c++0x -march=native -funroll-loops -Wall -Wl,--no-as-needed
-OBJ = mf.o convert.o train.o predict.o view.o
-#DFLAG = -DNOSSE
+CXXFLAGS = -O3 -pthread -std=c++0x -march=native
+SHVER = 1
+
+# run `make clean all' if you change the following flags.
+
+# comment the following flag if you do not want to use SSE
+DFLAG = -DUSESSE
+
+# uncomment the following flags if you want to use AVX
 #DFLAG = -DUSEAVX
-#CFLAGS += -mavx
+#CXXFLAGS += -mavx
 
-all: libmf
+# uncomment the following flags if you do not want to use OpenMP
+DFLAG += -DUSEOMP
+CXXFLAGS += -fopenmp
 
-%.o: src/%.cpp src/mf.h
-	$(CXX) $(CFLAGS) $(DFLAG) -c -o $@ $<
+all: mf-train mf-predict
 
-libmf: $(OBJ) src/main.cpp src/mf.h
-	$(CXX) $(CFLAGS) -o libmf $^
+lib: 
+	$(CXX) -shared -Wl,-soname,libmf.so.$(SHVER) -o libmf.so.$(SHVER) mf.o 
+
+mf-train: mf-train.cpp mf.o
+	$(CXX) $(CXXFLAGS) $(DFLAG) -o $@ $^
+
+mf-predict: mf-predict.cpp mf.o
+	$(CXX) $(CXXFLAGS) $(DFLAG) -o $@ $^
+
+mf.o: mf.cpp mf.h
+	$(CXX) $(CXXFLAGS) $(DFLAG) -c -fPIC -o $@ $<
 
 clean:
-	rm -f $(OBJ) libmf
+	rm -f mf-train mf-predict mf.o libmf.so.$(SHVER)
