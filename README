@@ -56,7 +56,7 @@ Command Line Usage
     -k <factor>: set number of latent factors (default 8)
     -t <iter>: set number of iterations (default 20)
     -r <eta>: set learning rate (default 0.1)
-    -s <threads>: set number of threads (default 1)
+    -s <threads>: set number of threads (default 12)
     -p <path>: set path to validation set
     -v <fold>: set number of folds for cross validation
     --quiet: quiet mode (no outputs)
@@ -178,7 +178,7 @@ There are four public data structures in LIBMF.
     variable      meaning                             default
     =========================================================
     k             number of latent factors                  8
-    nr_threads    number of threads used                    1
+    nr_threads    number of threads used                   12
     nr_bins       number of blocks                         20
     nr_iters      number of iterations                     20
     lambda        regularization cost                     0.1

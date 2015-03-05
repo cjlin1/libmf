@@ -1270,7 +1270,7 @@ mf_parameter mf_get_default_param()
     mf_parameter param;
 
     param.k = 8;
-    param.nr_threads = 1;
+    param.nr_threads = 12;
     param.nr_bins = 20;
     param.nr_iters = 20;
     param.lambda = 0.1f;

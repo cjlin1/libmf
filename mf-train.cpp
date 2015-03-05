@@ -31,7 +31,7 @@ string train_help()
 "-k <dimensions>: set number of dimensions (default 8)\n"
 "-t <iter>: set number of iterations (default 20)\n"
 "-r <eta>: set learning rate (default 0.1)\n"
-"-s <threads>: set number of threads (default 1)\n"
+"-s <threads>: set number of threads (default 12)\n"
 "-p <path>: set path to the validation set\n"
 "-v <fold>: set number of folds for cross validation\n"
 "--quiet: quiet mode (no outputs)\n"
