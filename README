@@ -214,8 +214,13 @@ There are four public data structures in LIBMF.
 
     `mf_model' is used to store models in LIBMF. `m' represents the number of
     rows, `n' represents the number of columns, and `k' represents the number
-    of latent factors. `P' and `Q' store two matrices that factorize the data
-    matrix. The lengths of `P' and `Q' are respectively `m*k' and `n*k.'
+    of latent factors. `P' is used to store a kxm matrix in column oriented
+    format. For example, if `P' stores a 3x4 matrix, then the content of `P'
+    is:
+        
+        P11 P21 P31 P12 P22 P32 P13 P23 P33 P14 P24 P34
+
+    `Q' is used to store a kxn matrix in the same manner.
 
 
 Functions available in LIBMF include:
