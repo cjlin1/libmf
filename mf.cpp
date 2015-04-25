@@ -961,6 +961,7 @@ shared_ptr<mf_model> fpsg(
     vector<mf_float> PG(model->m*2, 1), QG(model->n*2, 1);
 
 #if defined USESSE || defined USEAVX
+    auto flush_zero_mode = _MM_GET_FLUSH_ZERO_MODE();
     _MM_SET_FLUSH_ZERO_MODE(_MM_FLUSH_ZERO_ON);
 #endif
     
@@ -1024,7 +1025,7 @@ shared_ptr<mf_model> fpsg(
         thread.join();
 
 #if defined USESSE || defined USEAVX
-    _MM_SET_FLUSH_ZERO_MODE(_MM_FLUSH_ZERO_OFF);
+    _MM_SET_FLUSH_ZERO_MODE(flush_zero_mode);
 #endif
 
     mf_double loss = calc_loss(tr->R, tr->nnz, *model, param.nr_threads)*std_dev*std_dev;
