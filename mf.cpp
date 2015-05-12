@@ -33,7 +33,7 @@ namespace mf
 
 using namespace std;
 
-namespace
+namespace // unnamed namespace
 {
 
 mf_int const kALIGNByte = 32;
@@ -201,85 +201,6 @@ bool Scheduler::is_terminated()
 {
     lock_guard<mutex> lock(mtx);
     return terminated;
-}
-
-mf_float* malloc_aligned_float(mf_long size)
-{
-    void *ptr;
-#ifdef _WIN32
-    ptr = _aligned_malloc(size*sizeof(mf_float), kALIGNByte);
-    if(ptr == nullptr)
-        throw bad_alloc();
-#else
-    int status = posix_memalign(&ptr, kALIGNByte, size*sizeof(mf_float));
-    if(status != 0)
-        throw bad_alloc();
-#endif
-    
-    return (mf_float*)ptr;
-}
-
-mf_model* init_model(mf_int m, mf_int n, mf_int k_real, mf_int k_aligned)
-{
-    mf_model *model = new mf_model;
-    model->m = m;
-    model->n = n;
-    model->k = k_aligned;
-    model->P = nullptr;
-    model->Q = nullptr;
-
-    mf_float scale = sqrt(1.0/k_real);
-	default_random_engine generator;
-    uniform_real_distribution<mf_float> distribution(0.0, 1.0);
-
-    try
-    {
-        model->P = malloc_aligned_float((mf_long)m*model->k);
-        model->Q = malloc_aligned_float((mf_long)n*model->k);
-    }
-    catch(bad_alloc const &e)
-    {
-        mf_destroy_model(&model);
-        throw; 
-    }
-
-    auto init1 = [&] (mf_float *ptr, mf_int count)
-    {
-        for(mf_int i = 0; i < count; i++)
-        {
-            mf_long d = 0;
-            for(; d < k_real; d++, ptr++)
-                *ptr = (mf_float)(distribution(generator)*scale);
-            for(; d < k_aligned; d++, ptr++)
-                *ptr = 0;
-        }
-    };
-
-    init1(model->P, m);
-    init1(model->Q, n);
-
-    return model;
-}
-
-mf_float calc_std_dev(mf_problem &prob, mf_int const nr_threads)
-{
-    mf_double avg = 0;
-#if defined USEOMP
-#pragma omp parallel for num_threads(nr_threads) schedule(static) reduction(+: avg)
-#endif
-    for(mf_long i = 0; i < prob.nnz; i++)
-        avg += prob.R[i].r;
-    avg /= prob.nnz;
-
-    mf_double std_dev = 0;
-#if defined USEOMP
-#pragma omp parallel for num_threads(nr_threads) schedule(static) reduction(+: std_dev)
-#endif
-    for(mf_long i = 0; i < prob.nnz; i++)
-        std_dev += (prob.R[i].r-avg)*(prob.R[i].r-avg);
-    std_dev = sqrt(std_dev/prob.nnz);
-
-    return (mf_float)std_dev;
 }
 
 #if defined USESSE
@@ -594,7 +515,58 @@ void sg(vector<mf_node*> &ptrs, mf_model &model, Scheduler &sched,
 #endif
 }
 
-void scale_problem(mf_problem &prob, mf_float scale, mf_int const nr_threads)
+class Utility
+{
+public:
+    Utility (mf_int n);
+    void shuffle_problem(mf_problem &prob, vector<mf_int> &p_map, vector<mf_int> &q_map);
+    vector<mf_node*> grid_problem(mf_problem &prob, mf_int nr_bins);
+    mf_float calc_std_dev(mf_problem &prob);
+    void scale_problem(mf_problem &prob, mf_float scale);
+    mf_float inner_product(mf_float *p, mf_float *q, mf_int k);
+    mf_double calc_reg(mf_model &model, vector<mf_int> &omega_p, vector<mf_int> &omega_q);
+    mf_double calc_loss(mf_node *R, mf_long size, mf_model const &model);
+    mf_double calc_rmse(mf_problem &prob, mf_model &model);
+    void scale_model(mf_model &model, mf_float scale);
+
+    static mf_problem* copy_problem(mf_problem const *prob, bool copy_data);
+    static vector<mf_int> gen_random_map(mf_int size);
+    static mf_float* malloc_aligned_float(mf_long size);
+    static mf_model* init_model(mf_int m, mf_int n, mf_int k_real, mf_int k_aligned);
+    static vector<mf_int> gen_inv_map(vector<mf_int> &map);
+    static void shrink_model(mf_model &model, mf_int k_new);
+    static void shuffle_model(mf_model &model, vector<mf_int> &p_map, vector<mf_int> &q_map);
+
+private:
+    mf_int nr_threads;
+};
+
+Utility::Utility(mf_int n):
+    nr_threads(n)
+{ }
+
+mf_float Utility::calc_std_dev(mf_problem &prob)
+{
+    mf_double avg = 0;
+#if defined USEOMP
+#pragma omp parallel for num_threads(nr_threads) schedule(static) reduction(+: avg)
+#endif
+    for(mf_long i = 0; i < prob.nnz; i++)
+        avg += prob.R[i].r;
+    avg /= prob.nnz;
+
+    mf_double std_dev = 0;
+#if defined USEOMP
+#pragma omp parallel for num_threads(nr_threads) schedule(static) reduction(+: std_dev)
+#endif
+    for(mf_long i = 0; i < prob.nnz; i++)
+        std_dev += (prob.R[i].r-avg)*(prob.R[i].r-avg);
+    std_dev = sqrt(std_dev/prob.nnz);
+
+    return (mf_float)std_dev;
+}
+
+void Utility::scale_problem(mf_problem &prob, mf_float scale)
 {
 #if defined USEOMP
 #pragma omp parallel for num_threads(nr_threads) schedule(static)
@@ -603,7 +575,7 @@ void scale_problem(mf_problem &prob, mf_float scale, mf_int const nr_threads)
         prob.R[i].r *= scale;
 }
 
-void scale_model(mf_model &model, mf_float scale, mf_int const nr_threads)
+void Utility::scale_model(mf_model &model, mf_float scale)
 {
     mf_int k = model.k;
 
@@ -624,7 +596,7 @@ void scale_model(mf_model &model, mf_float scale, mf_int const nr_threads)
     scale1(model.Q, model.n);
 }
 
-mf_float inner_product(mf_float *p, mf_float *q, mf_int k)
+mf_float Utility::inner_product(mf_float *p, mf_float *q, mf_int k)
 {
 #if defined USESSE
     __m128 XMM = _mm_setzero_ps();
@@ -652,7 +624,7 @@ mf_float inner_product(mf_float *p, mf_float *q, mf_int k)
 #endif
 }
 
-mf_double calc_reg(mf_model &model, vector<mf_int> &omega_p, vector<mf_int> &omega_q, mf_int const nr_threads)
+mf_double Utility::calc_reg(mf_model &model, vector<mf_int> &omega_p, vector<mf_int> &omega_q)
 {
     auto calc_reg1 = [&] (mf_float *ptr, mf_int size, vector<mf_int> &omega)
     {
@@ -673,7 +645,7 @@ mf_double calc_reg(mf_model &model, vector<mf_int> &omega_p, vector<mf_int> &ome
            calc_reg1(model.Q, model.n, omega_q);
 }
 
-mf_double calc_loss(mf_node *R, mf_long size, mf_model const &model, mf_int const nr_threads)
+mf_double Utility::calc_loss(mf_node *R, mf_long size, mf_model const &model)
 {
     mf_double loss = 0;
 #if defined USEOMP
@@ -688,21 +660,20 @@ mf_double calc_loss(mf_node *R, mf_long size, mf_model const &model, mf_int cons
     return loss;
 }
 
-mf_double calc_rmse(mf_problem &prob, mf_model &model, mf_int const nr_threads)
+mf_double Utility::calc_rmse(mf_problem &prob, mf_model &model)
 {
     if(prob.nnz == 0)
         return 0;
 
-    mf_double loss = calc_loss(prob.R, prob.nnz, model, nr_threads);
+    mf_double loss = calc_loss(prob.R, prob.nnz, model);
 
     return sqrt(loss/prob.nnz);
 }
 
-void shuffle_problem(
+void Utility::shuffle_problem(
     mf_problem &prob, 
     vector<mf_int> &p_map, 
-    vector<mf_int> &q_map,
-    mf_int const nr_threads)
+    vector<mf_int> &q_map)
 {
 #if defined USEOMP
 #pragma omp parallel for num_threads(nr_threads) schedule(static)
@@ -717,7 +688,7 @@ void shuffle_problem(
     }
 }
 
-vector<mf_node*> grid_problem(mf_problem &prob, mf_int nr_bins, mf_int const nr_threads)
+vector<mf_node*> Utility::grid_problem(mf_problem &prob, mf_int nr_bins)
 {
     vector<mf_long> counts(nr_bins*nr_bins, 0);
 
@@ -790,7 +761,65 @@ vector<mf_node*> grid_problem(mf_problem &prob, mf_int nr_bins, mf_int const nr_
     return ptrs;
 }
 
-vector<mf_int> gen_random_map(mf_int size)
+mf_float* Utility::malloc_aligned_float(mf_long size)
+{
+    void *ptr;
+#ifdef _WIN32
+    ptr = _aligned_malloc(size*sizeof(mf_float), kALIGNByte);
+    if(ptr == nullptr)
+        throw bad_alloc();
+#else
+    int status = posix_memalign(&ptr, kALIGNByte, size*sizeof(mf_float));
+    if(status != 0)
+        throw bad_alloc();
+#endif
+ 
+    return (mf_float*)ptr;
+}
+
+mf_model* Utility::init_model(mf_int m, mf_int n, mf_int k_real, mf_int k_aligned)
+{
+    mf_model *model = new mf_model;
+    model->m = m;
+    model->n = n;
+    model->k = k_aligned;
+    model->P = nullptr;
+    model->Q = nullptr;
+
+    mf_float scale = sqrt(1.0/k_real);
+	default_random_engine generator;
+    uniform_real_distribution<mf_float> distribution(0.0, 1.0);
+
+    try
+    {
+        model->P = Utility::malloc_aligned_float((mf_long)m*model->k);
+        model->Q = Utility::malloc_aligned_float((mf_long)n*model->k);
+    }
+    catch(bad_alloc const &e)
+    {
+        mf_destroy_model(&model);
+        throw; 
+    }
+
+    auto init1 = [&] (mf_float *ptr, mf_int count)
+    {
+        for(mf_int i = 0; i < count; i++)
+        {
+            mf_long d = 0;
+            for(; d < k_real; d++, ptr++)
+                *ptr = (mf_float)(distribution(generator)*scale);
+            for(; d < k_aligned; d++, ptr++)
+                *ptr = 0;
+        }
+    };
+
+    init1(model->P, m);
+    init1(model->Q, n);
+
+    return model;
+}
+
+vector<mf_int> Utility::gen_random_map(mf_int size)
 {
     srand(0);
     vector<mf_int> map(size, 0);
@@ -800,7 +829,7 @@ vector<mf_int> gen_random_map(mf_int size)
     return map;
 }
 
-vector<mf_int> gen_inv_map(vector<mf_int> &map)
+vector<mf_int> Utility::gen_inv_map(vector<mf_int> &map)
 {
     vector<mf_int> inv_map(map.size());
     for(mf_int i = 0; i < map.size(); i++)
@@ -808,7 +837,7 @@ vector<mf_int> gen_inv_map(vector<mf_int> &map)
     return inv_map;
 }
 
-void shuffle_model(
+void Utility::shuffle_model(
     mf_model &model, 
     vector<mf_int> &p_map, 
     vector<mf_int> &q_map)
@@ -838,7 +867,7 @@ void shuffle_model(
     inv_shuffle1(model.Q, q_map, model.n, model.k);
 }
 
-void shrink_model(mf_model &model, mf_int k_new)
+void Utility::shrink_model(mf_model &model, mf_int k_new)
 {
     mf_int k_old = model.k;
     model.k = k_new;
@@ -857,7 +886,7 @@ void shrink_model(mf_model &model, mf_int k_new)
     shrink1(model.Q, model.n);
 }
 
-mf_problem* copy_problem(mf_problem const *prob, bool copy_data)
+mf_problem* Utility::copy_problem(mf_problem const *prob, bool copy_data)
 {
     mf_problem *new_prob = new mf_problem;
 
@@ -905,6 +934,7 @@ shared_ptr<mf_model> fpsg(
     mf_long *cv_count=nullptr)
 {
     param.nr_bins = max(param.nr_bins, 2*param.nr_threads);
+    Utility util(param.nr_threads);
 
     shared_ptr<mf_problem> tr, va;
     if(param.copy_data)
@@ -918,32 +948,32 @@ shared_ptr<mf_model> fpsg(
             }
         };
 
-        tr = shared_ptr<mf_problem>(copy_problem(tr_, true), deleter());
-        va = shared_ptr<mf_problem>(copy_problem(va_, true), deleter());
+        tr = shared_ptr<mf_problem>(Utility::copy_problem(tr_, true), deleter());
+        va = shared_ptr<mf_problem>(Utility::copy_problem(va_, true), deleter());
     }
     else
     {
-        tr = shared_ptr<mf_problem>(copy_problem(tr_, false));
-        va = shared_ptr<mf_problem>(copy_problem(va_, false));
+        tr = shared_ptr<mf_problem>(Utility::copy_problem(tr_, false));
+        va = shared_ptr<mf_problem>(Utility::copy_problem(va_, false));
     }
 
-    vector<mf_int> p_map = gen_random_map(tr->m);
-    vector<mf_int> q_map = gen_random_map(tr->n);
+    vector<mf_int> p_map = Utility::gen_random_map(tr->m);
+    vector<mf_int> q_map = Utility::gen_random_map(tr->n);
 
-    shuffle_problem(*tr, p_map, q_map, param.nr_threads);
-    shuffle_problem(*va, p_map, q_map, param.nr_threads);
+    util.shuffle_problem(*tr, p_map, q_map);
+    util.shuffle_problem(*va, p_map, q_map);
 
-    vector<mf_node*> ptrs = grid_problem(*tr, param.nr_bins, param.nr_threads);
+    vector<mf_node*> ptrs = util.grid_problem(*tr, param.nr_bins);
 
     mf_int k_aligned = (mf_int)ceil(mf_double(param.k)/kALIGN)*kALIGN;
 
-    shared_ptr<mf_model> model(init_model(tr->m, tr->n, param.k, k_aligned), 
+    shared_ptr<mf_model> model(Utility::init_model(tr->m, tr->n, param.k, k_aligned), 
                                [] (mf_model *ptr) { mf_destroy_model(&ptr); });
 
-    mf_float std_dev = calc_std_dev(*tr, param.nr_threads);
+    mf_float std_dev = util.calc_std_dev(*tr);
 
-    scale_problem(*tr, 1.0/std_dev, param.nr_threads);
-    scale_problem(*va, 1.0/std_dev, param.nr_threads);
+    util.scale_problem(*tr, 1.0/std_dev);
+    util.scale_problem(*va, 1.0/std_dev);
     param.lambda /= std_dev;
 
     Scheduler sched(param.nr_bins, param.nr_threads, cv_blocks);
@@ -992,7 +1022,7 @@ shared_ptr<mf_model> fpsg(
 
         if(!param.quiet)
         {
-            mf_double reg = calc_reg(*model, omega_p, omega_q, param.nr_threads)*
+            mf_double reg = util.calc_reg(*model, omega_p, omega_q)*
                             param.lambda*std_dev*std_dev;
 
             mf_double tr_loss = sched.get_loss()*std_dev*std_dev;
@@ -1005,7 +1035,7 @@ shared_ptr<mf_model> fpsg(
             cout << fixed << setprecision(4) << tr_rmse;
             if(va->nnz != 0)
             {
-                mf_double va_rmse = calc_rmse(*va, *model, param.nr_threads)*std_dev;
+                mf_double va_rmse = util.calc_rmse(*va, *model)*std_dev;
                 cout.width(10);
                 cout << fixed << setprecision(4) << va_rmse;
             }
@@ -1028,7 +1058,7 @@ shared_ptr<mf_model> fpsg(
     _MM_SET_FLUSH_ZERO_MODE(flush_zero_mode);
 #endif
 
-    mf_double loss = calc_loss(tr->R, tr->nnz, *model, param.nr_threads)*std_dev*std_dev;
+    mf_double loss = util.calc_loss(tr->R, tr->nnz, *model)*std_dev*std_dev;
 
     if(!param.quiet)
         cout << "real tr_rmse = " << fixed << setprecision(4) << sqrt(loss/tr->nnz) << endl;
@@ -1039,26 +1069,26 @@ shared_ptr<mf_model> fpsg(
         *cv_count = 0;
         for(auto block : cv_blocks)
         {
-            *cv_loss += calc_loss(ptrs[block], ptrs[block+1]-ptrs[block], *model, param.nr_threads);
+            *cv_loss += util.calc_loss(ptrs[block], ptrs[block+1]-ptrs[block], *model);
             *cv_count += ptrs[block+1]-ptrs[block];
         }
         *cv_loss *= std_dev*std_dev;
     }
 
-    vector<mf_int> inv_p_map = gen_inv_map(p_map);
-    vector<mf_int> inv_q_map = gen_inv_map(q_map);
+    vector<mf_int> inv_p_map = Utility::gen_inv_map(p_map);
+    vector<mf_int> inv_q_map = Utility::gen_inv_map(q_map);
 
     if(!param.copy_data)
     {
-        scale_problem(*tr, std_dev, param.nr_threads);
-        scale_problem(*va, std_dev, param.nr_threads);
-        shuffle_problem(*tr, inv_p_map, inv_q_map, param.nr_threads);
-        shuffle_problem(*va, inv_p_map, inv_q_map, param.nr_threads);
+        util.scale_problem(*tr, std_dev);
+        util.scale_problem(*va, std_dev);
+        util.shuffle_problem(*tr, inv_p_map, inv_q_map);
+        util.shuffle_problem(*va, inv_p_map, inv_q_map);
     }
 
-    scale_model(*model, sqrt(std_dev), param.nr_threads);
-    shrink_model(*model, param.k);
-    shuffle_model(*model, inv_p_map, inv_q_map);
+    util.scale_model(*model, sqrt(std_dev));
+    Utility::shrink_model(*model, param.k);
+    Utility::shuffle_model(*model, inv_p_map, inv_q_map);
 
     return model;
 }
@@ -1210,8 +1240,8 @@ mf_model* mf_load_model(char const *path)
 
     try
     {
-        model->P = malloc_aligned_float((mf_long)model->m*model->k);
-        model->Q = malloc_aligned_float((mf_long)model->n*model->k);
+        model->P = Utility::malloc_aligned_float((mf_long)model->m*model->k);
+        model->Q = Utility::malloc_aligned_float((mf_long)model->n*model->k);
     }
     catch(bad_alloc const &e)
     {
@@ -1236,17 +1266,6 @@ mf_model* mf_load_model(char const *path)
     return model;
 }
 
-mf_float mf_predict(mf_model const *model, mf_int u, mf_int v)
-{
-    if(u < 0 || u >= model->m || v < 0 || v >= model->n)
-        return 0.0f;
-
-    mf_float *p = model->P+(mf_long)u*model->k;
-    mf_float *q = model->Q+(mf_long)v*model->k;
-
-    return std::inner_product(p, p+model->k, q, (mf_float)0);
-}
-
 void mf_destroy_model(mf_model **model)
 {
     if(model == nullptr || *model == nullptr)
@@ -1260,6 +1279,17 @@ void mf_destroy_model(mf_model **model)
 #endif
     delete *model;
     *model = nullptr;
+}
+
+mf_float mf_predict(mf_model const *model, mf_int u, mf_int v)
+{
+    if(u < 0 || u >= model->m || v < 0 || v >= model->n)
+        return 0.0f;
+
+    mf_float *p = model->P+(mf_long)u*model->k;
+    mf_float *q = model->Q+(mf_long)v*model->k;
+
+    return std::inner_product(p, p+model->k, q, (mf_float)0);
 }
 
 mf_parameter mf_get_default_param()
