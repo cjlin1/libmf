@@ -970,7 +970,7 @@ shared_ptr<mf_model> fpsg(
     shared_ptr<mf_model> model(Utility::init_model(tr->m, tr->n, param.k, k_aligned), 
                                [] (mf_model *ptr) { mf_destroy_model(&ptr); });
 
-    mf_float std_dev = util.calc_std_dev(*tr);
+    mf_float std_dev = max((mf_float)1e-4, util.calc_std_dev(*tr));
 
     util.scale_problem(*tr, 1.0/std_dev);
     util.scale_problem(*va, 1.0/std_dev);
