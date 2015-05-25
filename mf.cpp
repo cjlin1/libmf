@@ -13,6 +13,7 @@
 #include <new>
 #include <string>
 #include <memory>
+#include <set>
 
 #include "mf.h"
 
@@ -532,7 +533,7 @@ public:
     static mf_problem* copy_problem(mf_problem const *prob, bool copy_data);
     static vector<mf_int> gen_random_map(mf_int size);
     static mf_float* malloc_aligned_float(mf_long size);
-    static mf_model* init_model(mf_int m, mf_int n, mf_int k_real, mf_int k_aligned);
+    static mf_model* init_model(shared_ptr<mf_problem> prob, mf_int k_real, mf_int k_aligned);
     static vector<mf_int> gen_inv_map(vector<mf_int> &map);
     static void shrink_model(mf_model &model, mf_int k_new);
     static void shuffle_model(mf_model &model, vector<mf_int> &p_map, vector<mf_int> &q_map);
@@ -777,11 +778,11 @@ mf_float* Utility::malloc_aligned_float(mf_long size)
     return (mf_float*)ptr;
 }
 
-mf_model* Utility::init_model(mf_int m, mf_int n, mf_int k_real, mf_int k_aligned)
+mf_model* Utility::init_model(shared_ptr<mf_problem> prob, mf_int k_real, mf_int k_aligned)
 {
     mf_model *model = new mf_model;
-    model->m = m;
-    model->n = n;
+    model->m = prob->m;
+    model->n = prob->n;
     model->k = k_aligned;
     model->P = nullptr;
     model->Q = nullptr;
@@ -792,8 +793,8 @@ mf_model* Utility::init_model(mf_int m, mf_int n, mf_int k_real, mf_int k_aligne
 
     try
     {
-        model->P = Utility::malloc_aligned_float((mf_long)m*model->k);
-        model->Q = Utility::malloc_aligned_float((mf_long)n*model->k);
+        model->P = Utility::malloc_aligned_float((mf_long)model->m*model->k);
+        model->Q = Utility::malloc_aligned_float((mf_long)model->n*model->k);
     }
     catch(bad_alloc const &e)
     {
@@ -801,20 +802,28 @@ mf_model* Utility::init_model(mf_int m, mf_int n, mf_int k_real, mf_int k_aligne
         throw; 
     }
 
-    auto init1 = [&] (mf_float *ptr, mf_int count)
+    set<mf_int> u_set;
+    set<mf_int> v_set;
+
+    for (mf_int i=0; i<prob->nnz; i++)
     {
-        for(mf_int i = 0; i < count; i++)
+        u_set.insert(prob->R[i].u);
+        v_set.insert(prob->R[i].v);
+    }
+
+    auto init1 = [&](mf_float *start_ptr, mf_int count, set<mf_int> nz_set)
+    {
+        memset(start_ptr, 0, sizeof(mf_float)*count*model->k);
+        for (auto it = nz_set.begin(); it != nz_set.end(); it++)
         {
-            mf_long d = 0;
-            for(; d < k_real; d++, ptr++)
+            mf_float * ptr = start_ptr + (mf_long)(*it)*model->k;
+            for(mf_long d = 0; d < k_real; d++, ptr++)
                 *ptr = (mf_float)(distribution(generator)*scale);
-            for(; d < k_aligned; d++, ptr++)
-                *ptr = 0;
         }
     };
 
-    init1(model->P, m);
-    init1(model->Q, n);
+    init1(model->P, prob->m, u_set);
+    init1(model->Q, prob->n, v_set);
 
     return model;
 }
@@ -967,7 +976,7 @@ shared_ptr<mf_model> fpsg(
 
     mf_int k_aligned = (mf_int)ceil(mf_double(param.k)/kALIGN)*kALIGN;
 
-    shared_ptr<mf_model> model(Utility::init_model(tr->m, tr->n, param.k, k_aligned), 
+    shared_ptr<mf_model> model(Utility::init_model(tr, param.k, k_aligned), 
                                [] (mf_model *ptr) { mf_destroy_model(&ptr); });
 
     mf_float std_dev = max((mf_float)1e-4, util.calc_std_dev(*tr));
