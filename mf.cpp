@@ -405,18 +405,43 @@ void sg(vector<mf_node*> &ptrs, mf_model &model, Scheduler &sched,
             mf_float *pG = PG+N->u*2;
             mf_float *qG = QG+N->v*2;
 
-            __m128 XMMe = _mm_setzero_ps();
-            for(mf_int d = 0; d < model.k; d += 4)
-                XMMe = _mm_add_ps(XMMe, _mm_mul_ps(
-                       _mm_load_ps(p+d), _mm_load_ps(q+d)));
-            XMMe = _mm_hadd_ps(XMMe, XMMe);
-            XMMe = _mm_hadd_ps(XMMe, XMMe);
-            XMMe = _mm_sub_ps(_mm_set1_ps(N->r), XMMe);
-            XMMloss = _mm_add_pd(XMMloss, 
-                      _mm_cvtps_pd(_mm_mul_ps(XMMe, XMMe)));
+            __m128 XMMz = _mm_setzero_ps();
+            for(mf_int d = 0; d < model.k; d+= 4)
+                XMMz = _mm_add_ps(XMMz, _mm_mul_ps(_mm_load_ps(p+d),
+                        _mm_load_ps(q+d)));
+            XMMz = _mm_hadd_ps(XMMz, XMMz);
+            XMMz = _mm_hadd_ps(XMMz, XMMz);
+
+            mf_float z = 0;
+            switch(param.fun)
+            {
+                case 0:
+                    XMMz = _mm_sub_ps(_mm_set1_ps(N->r), XMMz);
+                    XMMloss = _mm_add_pd(XMMloss,
+                            _mm_cvtps_pd(_mm_mul_ps(XMMz, XMMz)));
+                    break;
+                case 1:
+                    _mm_store_ss(&z, XMMz);
+                    if(N->r > 0)
+                    {
+                        z = exp(-z);
+                        XMMloss = _mm_add_pd(XMMloss, _mm_set1_pd(log(1+z)));
+                        XMMz = _mm_set1_ps(z/(1+z));
+                    }
+                    else
+                    {
+                        z = exp(z);
+                        XMMloss = _mm_add_pd(XMMloss, _mm_set1_pd(log(1+z)));
+                        XMMz = _mm_set1_ps(-z/(1+z));
+                    }
+                    break;
+                default:
+                    throw invalid_argument("unsupported loss function");
+                    break;
+            }
 
             sg_update(p, q, pG, qG, 0, kALIGN, XMMeta, XMMlambda, 
-                      XMMe, XMMrk_slow, param.do_nmf);
+                      XMMz, XMMrk_slow, param.do_nmf);
 
             if(slow_only)
                 continue;
@@ -424,7 +449,7 @@ void sg(vector<mf_node*> &ptrs, mf_model &model, Scheduler &sched,
             pG++;
             qG++;
             sg_update(p, q, pG, qG, kALIGN, model.k, XMMeta, XMMlambda, 
-                      XMMe, XMMrk_fast, param.do_nmf);
+                      XMMz, XMMrk_fast, param.do_nmf);
         }
         mf_double loss;
         _mm_store_sd(&loss, XMMloss);
@@ -491,13 +516,37 @@ void sg(vector<mf_node*> &ptrs, mf_model &model, Scheduler &sched,
             mf_float *pG = PG+N->u*2;
             mf_float *qG = QG+N->v*2;
 
-            mf_float error = N->r;
+            mf_float z = 0;
             for(mf_int d = 0; d < model.k; d++)
-                error -= p[d]*q[d];
-            loss += error*error;
+                z += p[d]*q[d];
+
+            switch(param.fun)
+            {
+                case 0:
+                    z = N->r-z;
+                    loss += z*z;
+                    break;
+                case 1:
+                    if(N->r > 0)
+                    {
+                        z = exp(-z);
+                        loss += log(1+z);
+                        z = z/(1+z);
+                    }
+                    else
+                    {
+                        z = exp(z);
+                        loss += log(1+z);
+                        z = -z/(1+z);
+                    }
+                    break;
+                 default:
+                    throw invalid_argument("unsupported loss function");
+                    break;
+            }
 
             sg_update(p, q, pG, qG, 0, kALIGN, param.eta, 
-                      param.lambda, error, rk_slow, param.do_nmf);
+                      param.lambda, z, rk_slow, param.do_nmf);
 
             if(slow_only)
                 continue;
@@ -506,7 +555,7 @@ void sg(vector<mf_node*> &ptrs, mf_model &model, Scheduler &sched,
             qG++;
 
             sg_update(p, q, pG, qG, kALIGN, model.k, param.eta, 
-                      param.lambda, error, rk_fast, param.do_nmf);
+                      param.lambda, z, rk_fast, param.do_nmf);
 
         }
         sched.put_job(block, loss);
@@ -541,12 +590,12 @@ public:
     static void shuffle_model(mf_model &model, vector<mf_int> &p_map, vector<mf_int> &q_map);
 
 private:
-    mf_int solver;
+    mf_int fun;
     mf_int nr_threads;
 };
 
-Utility::Utility(mf_int s, mf_int n):
-    solver(s), nr_threads(n)
+Utility::Utility(mf_int f, mf_int n):
+    fun(f), nr_threads(n)
 { }
 
 mf_float Utility::calc_std_dev(mf_problem &prob)
@@ -572,6 +621,9 @@ mf_float Utility::calc_std_dev(mf_problem &prob)
 
 void Utility::scale_problem(mf_problem &prob, mf_float scale)
 {
+    if(scale == 1.0)
+        return;
+
 #if defined USEOMP
 #pragma omp parallel for num_threads(nr_threads) schedule(static)
 #endif
@@ -581,6 +633,9 @@ void Utility::scale_problem(mf_problem &prob, mf_float scale)
 
 void Utility::scale_model(mf_model &model, mf_float scale)
 {
+    if(scale == 1.0)
+        return;
+
     mf_int k = model.k;
 
     auto scale1 = [&] (mf_float *ptr, mf_int size)
@@ -659,21 +714,21 @@ mf_double Utility::calc_loss(mf_node *R, mf_long size, mf_model const &model)
     {
         mf_node &N = R[i];
         mf_float z = mf_predict(&model, N.u, N.v);
-        if(solver == 0)
+        if(fun == 0)
             loss += pow(N.r-z, 2);
-        else if(solver == 1)
+        else if(fun == 1)
             if(N.r > 0)
-                loss += log(1+exp(-z));
+                loss += log(1.0+exp(-z));
             else
-                loss += log(1+exp(z));
+                loss += log(1.0+exp(z));
     }
     return loss;
 }
 string Utility::get_criterion_legend()
 {
-    if(solver == 0)
+    if(fun == 0)
         return string("rmse");
-    else if(solver == 1)
+    else if(fun == 1)
         return string("logloss");
     else
         return string();
@@ -684,7 +739,7 @@ mf_double Utility::get_criterion(mf_double const loss, mf_long const size)
     if(size == 0)
         return 0;
 
-    if(solver == 0)
+    if(fun == 0)
         return sqrt(loss/size);
     else
         return loss/size;
@@ -972,7 +1027,7 @@ shared_ptr<mf_model> fpsg(
     mf_long *cv_count=nullptr)
 {
     param.nr_bins = max(param.nr_bins, 2*param.nr_threads);
-    Utility util(0, param.nr_threads);
+    Utility util(param.fun, param.nr_threads);
 
     shared_ptr<mf_problem> tr, va;
     if(param.copy_data)
@@ -1008,7 +1063,7 @@ shared_ptr<mf_model> fpsg(
     shared_ptr<mf_model> model(Utility::init_model(tr, param.k, k_aligned), 
                                [] (mf_model *ptr) { mf_destroy_model(&ptr); });
 
-    mf_float std_dev = max((mf_float)1e-4, util.calc_std_dev(*tr));
+    mf_float std_dev = param.fun != 0? 1: max((mf_float)1e-4, util.calc_std_dev(*tr));
 
     util.scale_problem(*tr, 1.0/std_dev);
     util.scale_problem(*va, 1.0/std_dev);
@@ -1042,11 +1097,11 @@ shared_ptr<mf_model> fpsg(
     {
         cout.width(4);
         cout << "iter";
-        cout.width(10);
+        cout.width(13);
         cout << "tr_"+util.get_criterion_legend();
         if(va->nnz != 0)
         {
-            cout.width(10);
+            cout.width(13);
             cout << "va_"+util.get_criterion_legend();
         }
         cout.width(13);
@@ -1069,12 +1124,12 @@ shared_ptr<mf_model> fpsg(
             
             cout.width(4);
             cout << iter;
-            cout.width(10);
+            cout.width(13);
             cout << fixed << setprecision(4) << tr_criterion;
             if(va->nnz != 0)
             {
                 mf_double va_criterion = util.get_criterion(*va, *model)*std_dev;
-                cout.width(10);
+                cout.width(13);
                 cout << fixed << setprecision(4) << va_criterion;
             }
             cout.width(13);
@@ -1343,6 +1398,7 @@ mf_parameter mf_get_default_param()
     param.do_nmf = false;
     param.quiet = false;
     param.copy_data = true;
+    param.fun = 0;
 
     return param;
 }
