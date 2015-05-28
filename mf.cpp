@@ -519,31 +519,34 @@ void sg(vector<mf_node*> &ptrs, mf_model &model, Scheduler &sched,
 class Utility
 {
 public:
-    Utility (mf_int n);
+    Utility (mf_int s, mf_int n);
     void shuffle_problem(mf_problem &prob, vector<mf_int> &p_map, vector<mf_int> &q_map);
     vector<mf_node*> grid_problem(mf_problem &prob, mf_int nr_bins);
     mf_float calc_std_dev(mf_problem &prob);
     void scale_problem(mf_problem &prob, mf_float scale);
-    mf_float inner_product(mf_float *p, mf_float *q, mf_int k);
     mf_double calc_reg(mf_model &model, vector<mf_int> &omega_p, vector<mf_int> &omega_q);
     mf_double calc_loss(mf_node *R, mf_long size, mf_model const &model);
-    mf_double calc_rmse(mf_problem &prob, mf_model &model);
+    string get_criterion_legend();
+    mf_double get_criterion(mf_double const loss, mf_long const size);
+    mf_double get_criterion(mf_problem const &prob, mf_model const &model);
     void scale_model(mf_model &model, mf_float scale);
 
     static mf_problem* copy_problem(mf_problem const *prob, bool copy_data);
     static vector<mf_int> gen_random_map(mf_int size);
     static mf_float* malloc_aligned_float(mf_long size);
     static mf_model* init_model(shared_ptr<mf_problem> prob, mf_int k_real, mf_int k_aligned);
+    static mf_float inner_product(mf_float *p, mf_float *q, mf_int k);
     static vector<mf_int> gen_inv_map(vector<mf_int> &map);
     static void shrink_model(mf_model &model, mf_int k_new);
     static void shuffle_model(mf_model &model, vector<mf_int> &p_map, vector<mf_int> &q_map);
 
 private:
+    mf_int solver;
     mf_int nr_threads;
 };
 
-Utility::Utility(mf_int n):
-    nr_threads(n)
+Utility::Utility(mf_int s, mf_int n):
+    solver(s), nr_threads(n)
 { }
 
 mf_float Utility::calc_std_dev(mf_problem &prob)
@@ -636,7 +639,7 @@ mf_double Utility::calc_reg(mf_model &model, vector<mf_int> &omega_p, vector<mf_
         for(mf_int i = 0; i < size; i++)
         {
             mf_float *ptr1 = ptr+(mf_long)i*model.k;
-            reg += omega[i]*inner_product(ptr1, ptr1, model.k);
+            reg += omega[i]*Utility::inner_product(ptr1, ptr1, model.k);
         }
 
         return reg;
@@ -655,20 +658,46 @@ mf_double Utility::calc_loss(mf_node *R, mf_long size, mf_model const &model)
     for(mf_long i = 0; i < size; i++)
     {
         mf_node &N = R[i];
-        mf_float e = N.r - mf_predict(&model, N.u, N.v);
-        loss += e*e;
+        mf_float z = mf_predict(&model, N.u, N.v);
+        if(solver == 0)
+            loss += pow(N.r-z, 2);
+        else if(solver == 1)
+            if(N.r > 0)
+                loss += log(1+exp(-z));
+            else
+                loss += log(1+exp(z));
     }
     return loss;
 }
+string Utility::get_criterion_legend()
+{
+    if(solver == 0)
+        return string("rmse");
+    else if(solver == 1)
+        return string("logloss");
+    else
+        return string();
+}
 
-mf_double Utility::calc_rmse(mf_problem &prob, mf_model &model)
+mf_double Utility::get_criterion(mf_double const loss, mf_long const size)
+{
+    if(size == 0)
+        return 0;
+
+    if(solver == 0)
+        return sqrt(loss/size);
+    else
+        return loss/size;
+}
+
+mf_double Utility::get_criterion(mf_problem const &prob, mf_model const &model)
 {
     if(prob.nnz == 0)
         return 0;
 
     mf_double loss = calc_loss(prob.R, prob.nnz, model);
 
-    return sqrt(loss/prob.nnz);
+    return get_criterion(loss, prob.nnz);
 }
 
 void Utility::shuffle_problem(
@@ -943,7 +972,7 @@ shared_ptr<mf_model> fpsg(
     mf_long *cv_count=nullptr)
 {
     param.nr_bins = max(param.nr_bins, 2*param.nr_threads);
-    Utility util(param.nr_threads);
+    Utility util(0, param.nr_threads);
 
     shared_ptr<mf_problem> tr, va;
     if(param.copy_data)
@@ -1014,11 +1043,11 @@ shared_ptr<mf_model> fpsg(
         cout.width(4);
         cout << "iter";
         cout.width(10);
-        cout << "tr_rmse";
+        cout << "tr_"+util.get_criterion_legend();
         if(va->nnz != 0)
         {
             cout.width(10);
-            cout << "va_rmse";
+            cout << "va_"+util.get_criterion_legend();
         }
         cout.width(13);
         cout << "obj";
@@ -1036,17 +1065,17 @@ shared_ptr<mf_model> fpsg(
 
             mf_double tr_loss = sched.get_loss()*std_dev*std_dev;
 
-            mf_double tr_rmse = sqrt(tr_loss/tr->nnz);
+            mf_double tr_criterion = util.get_criterion(tr_loss, tr->nnz);
             
             cout.width(4);
             cout << iter;
             cout.width(10);
-            cout << fixed << setprecision(4) << tr_rmse;
+            cout << fixed << setprecision(4) << tr_criterion;
             if(va->nnz != 0)
             {
-                mf_double va_rmse = util.calc_rmse(*va, *model)*std_dev;
+                mf_double va_criterion = util.get_criterion(*va, *model)*std_dev;
                 cout.width(10);
-                cout << fixed << setprecision(4) << va_rmse;
+                cout << fixed << setprecision(4) << va_criterion;
             }
             cout.width(13);
             cout << fixed << setprecision(4) << scientific << reg+tr_loss;
