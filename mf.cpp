@@ -407,8 +407,8 @@ void sg(vector<mf_node*> &ptrs, mf_model &model, Scheduler &sched,
 
             __m128 XMMz = _mm_setzero_ps();
             for(mf_int d = 0; d < model.k; d+= 4)
-                XMMz = _mm_add_ps(XMMz, _mm_mul_ps(_mm_load_ps(p+d),
-                        _mm_load_ps(q+d)));
+                XMMz = _mm_add_ps(XMMz, _mm_mul_ps(
+                       _mm_load_ps(p+d), _mm_load_ps(q+d)));
             XMMz = _mm_hadd_ps(XMMz, XMMz);
             XMMz = _mm_hadd_ps(XMMz, XMMz);
 
@@ -417,8 +417,8 @@ void sg(vector<mf_node*> &ptrs, mf_model &model, Scheduler &sched,
             {
                 case 0:
                     XMMz = _mm_sub_ps(_mm_set1_ps(N->r), XMMz);
-                    XMMloss = _mm_add_pd(XMMloss,
-                            _mm_cvtps_pd(_mm_mul_ps(XMMz, XMMz)));
+                    XMMloss = _mm_add_pd(XMMloss, _mm_cvtps_pd(
+                              _mm_mul_ps(XMMz, XMMz)));
                     break;
                 case 1:
                     _mm_store_ss(&z, XMMz);
@@ -473,20 +473,45 @@ void sg(vector<mf_node*> &ptrs, mf_model &model, Scheduler &sched,
             mf_float *pG = PG+N->u*2;
             mf_float *qG = QG+N->v*2;
 
-            __m256 XMMe = _mm256_setzero_ps();
-            for(mf_int d = 0; d < model.k; d += 8)
-                XMMe = _mm256_add_ps(XMMe, _mm256_mul_ps(
+            __m256 XMMz = _mm256_setzero_ps();
+            for(mf_int d = 0; d < model.k; d+= 8)
+                XMMz = _mm256_add_ps(XMMz, _mm256_mul_ps(
                        _mm256_load_ps(p+d), _mm256_load_ps(q+d)));
-            XMMe = _mm256_add_ps(XMMe, _mm256_permute2f128_ps(XMMe, XMMe, 1));
-            XMMe = _mm256_hadd_ps(XMMe, XMMe);
-            XMMe = _mm256_hadd_ps(XMMe, XMMe);
-            XMMe = _mm256_sub_ps(_mm256_broadcast_ss(&N->r), XMMe);
-            XMMloss = _mm_add_pd(XMMloss, 
-                      _mm_cvtps_pd(_mm256_castps256_ps128(
-                      _mm256_mul_ps(XMMe, XMMe))));
+            XMMz = _mm256_hadd_ps(XMMz, XMMz);
+            XMMz = _mm256_hadd_ps(XMMz, XMMz);
+            XMMz = _mm256_hadd_ps(XMMz, XMMz);
+            
+            mf_float z = 0;
+            switch(param.fun)
+            {
+                case 0:
+                    XMMz = _mm256_sub_ps(_mm256_set1_ps(N->r-z), XMMz);
+                    XMMloss = _mm_add_pd(XMMloss,
+                              _mm_cvtps_pd(_mm256_castps256_ps128(
+                              _mm256_mul_ps(XMMz, XMMz))));
+                    break;
+                case 1:
+                    _mm_store1_ps(&z, _mm256_castps256_ps128(XMMz));
+                    if(N->r > 0)
+                    {
+                        z = exp(-z);
+                        XMMloss = _mm_add_pd(XMMloss, _mm_set1_pd(log(1.0+z)));
+                        XMMz = _mm256_set1_ps(z/(1+z));
+                    }
+                    else
+                    {
+                        z = exp(z);
+                        XMMloss = _mm_add_pd(XMMloss, _mm_set1_pd(log(1.0+z)));
+                        XMMz = _mm256_set1_ps(-z/(1+z));
+                    }
+                    break;
+                default:
+                    throw invalid_argument("unsupported loss function");
+                    break;
+            }
 
             sg_update(p, q, pG, qG, 0, kALIGN, XMMeta, XMMlambda, 
-                      XMMe, XMMrk_slow, param.do_nmf);
+                      XMMz, XMMrk_slow, param.do_nmf);
 
             if(slow_only)
                 continue;
@@ -494,7 +519,7 @@ void sg(vector<mf_node*> &ptrs, mf_model &model, Scheduler &sched,
             pG++;
             qG++;
             sg_update(p, q, pG, qG, kALIGN, model.k, XMMeta, XMMlambda, 
-                      XMMe, XMMrk_fast, param.do_nmf);
+                      XMMz, XMMrk_fast, param.do_nmf);
         }
         mf_double loss;
         _mm_store_sd(&loss, XMMloss);
