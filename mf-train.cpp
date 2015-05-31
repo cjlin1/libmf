@@ -27,7 +27,8 @@ string train_help()
 "usage: mf-train [options] training_set_file [model_file]\n"
 "\n"
 "options:\n"
-"-l <lambda>: set regularization parameter (default 0.1)\n"
+"-l1 <lambda_1>: set L1-regularization parameter (default 0)\n"
+"-l2 <lambda_2>: set L2-regularization parameter (default 0.1)\n"
 "-f <fun>: specify the loss function (default 0)\n"
 "     0 -- square loss,\n"
 "     1 -- logistic loss\n"
@@ -55,14 +56,39 @@ Option parse_option(int argc, char **argv)
     mf_int i;
     for(i = 1; i < argc; i++)
     {
-        if(args[i].compare("-l") == 0)
+        if(args[i].compare("-l1") == 0)
         {
             if((i+1) >= argc)
-                throw invalid_argument("need to specify lambda after -l");
+                throw invalid_argument("need to specify lambda after -l1");
             i++;
-            option.param.lambda = stof(args[i]);
-            if(option.param.lambda < 0)
-                throw invalid_argument("regularization parameter should not be smaller than zero");
+
+            char *pch = strtok(argv[i], ",");
+            if(stof(pch) < 0)
+                throw invalid_argument("regularization coefficient should be non-negative");
+            option.param.lambda_p1 = stof(pch);
+            option.param.lambda_q1 = stof(pch);
+            pch = strtok(NULL, ",");
+            if(pch != NULL)
+                if(stof(pch) < 0)
+                    throw invalid_argument("regularization coefficient should be non-negative");
+                option.param.lambda_q1 = stof(pch);
+        }
+        else if(args[i].compare("-l2") == 0)
+        {
+            if((i+1) >= argc)
+                throw invalid_argument("need to specify lambda after -l2");
+            i++;
+            
+            char *pch = strtok(argv[i], ",");
+            if(stof(pch) < 0)
+                throw invalid_argument("regularization coefficient should be non-negative");
+            option.param.lambda_p2 = stof(pch);
+            option.param.lambda_q2 = stof(pch);
+            pch = strtok(NULL, ",");
+            if(pch != NULL)
+                if(stof(pch) < 0)
+                    throw invalid_argument("regularization coefficient should be non-negative");
+                option.param.lambda_q2 = stof(pch);
         }
         else if(args[i].compare("-k") == 0)
         {

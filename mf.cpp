@@ -213,7 +213,10 @@ inline void sg_update(
     mf_int d_begin,
     mf_int d_end,
     __m128 &XMMeta,
-    __m128 &XMMlambda,
+    __m128 &XMMlambda_p1,
+    __m128 &XMMlambda_q1,
+    __m128 &XMMlambda_p2,
+    __m128 &XMMlambda_q2,
     __m128 &XMMe,
     __m128 &XMMrk,
     bool do_nmf)
@@ -232,9 +235,9 @@ inline void sg_update(
         __m128 XMMp = _mm_load_ps(p+d);
         __m128 XMMq = _mm_load_ps(q+d);
 
-        __m128 XMMpg = _mm_sub_ps(_mm_mul_ps(XMMlambda, XMMp),
+        __m128 XMMpg = _mm_sub_ps(_mm_mul_ps(XMMlambda_p2, XMMp),
                        _mm_mul_ps(XMMe, XMMq));
-        __m128 XMMqg = _mm_sub_ps(_mm_mul_ps(XMMlambda, XMMq),
+        __m128 XMMqg = _mm_sub_ps(_mm_mul_ps(XMMlambda_q2, XMMq),
                        _mm_mul_ps(XMMe, XMMp));
 
         XMMpG1 = _mm_add_ps(XMMpG1, _mm_mul_ps(XMMpg, XMMpg));
@@ -243,10 +246,29 @@ inline void sg_update(
         XMMp = _mm_sub_ps(XMMp, _mm_mul_ps(XMMeta_p, XMMpg));
         XMMq = _mm_sub_ps(XMMq, _mm_mul_ps(XMMeta_q, XMMqg));
 
+        mf_float tmp = 0;
+        _mm_store_ss(&tmp, XMMlambda_p1);
+        if(tmp > 0)
+        {
+            __m128 XMMflip = _mm_and_ps(_mm_cmple_ps(XMMp, _mm_set1_ps(0.0f)),
+                               _mm_set1_ps(-0.0f));
+            XMMp = _mm_xor_ps(XMMflip, _mm_max_ps(_mm_sub_ps(_mm_xor_ps(XMMp, XMMflip),
+                   _mm_mul_ps(XMMeta_p, XMMlambda_p1)), _mm_set1_ps(0.0f)));
+        }
+
+        _mm_store_ss(&tmp, XMMlambda_q1);
+        if(tmp > 0)
+        {
+            __m128 XMMflip = _mm_and_ps(_mm_cmple_ps(XMMq, _mm_set1_ps(0.0f)),
+                               _mm_set1_ps(-0.0f));
+            XMMq = _mm_xor_ps(XMMflip, _mm_max_ps(_mm_sub_ps(_mm_xor_ps(XMMq, XMMflip),
+                   _mm_mul_ps(XMMeta_q, XMMlambda_q1)), _mm_set1_ps(0.0f)));
+        }
+
         if(do_nmf)
         {
-            XMMp = _mm_max_ps(XMMp, _mm_set1_ps(0));
-            XMMq = _mm_max_ps(XMMq, _mm_set1_ps(0));
+            XMMp = _mm_max_ps(XMMp, _mm_set1_ps(0.0f));
+            XMMq = _mm_max_ps(XMMq, _mm_set1_ps(0.0f));
         }
 
         _mm_store_ps(p+d, XMMp);
@@ -349,7 +371,10 @@ inline void sg_update(
     mf_int d_begin,
     mf_int d_end,
     mf_float eta,
-    mf_float lambda,
+    mf_float lambda_p1,
+    mf_float lambda_q1,
+    mf_float lambda_p2,
+    mf_float lambda_q2,
     mf_float error,
     mf_float rk,
     bool do_nmf)
@@ -362,19 +387,31 @@ inline void sg_update(
 
     for(mf_int d = d_begin; d < d_end; d++)
     {
-        mf_float gp = -error*q[d]+lambda*p[d];
-        mf_float gq = -error*p[d]+lambda*q[d];
+        mf_float gp = -error*q[d]+lambda_p2*p[d];
+        mf_float gq = -error*p[d]+lambda_q2*q[d];
 
         pG1 += gp*gp;
         qG1 += gq*gq;
 
         p[d] -= eta_p*gp;
         q[d] -= eta_q*gq;
-        
+
+        if(lambda_p1 > 0)
+        {
+            mf_float p1 = max(abs(p[d])-lambda_p1*eta_p, 0.0f);
+            p[d] = p[d] >= 0? p1: -p1;
+        }
+
+        if(lambda_q1 > 0)
+        {
+            mf_float q1 = max(abs(q[d])-lambda_q1*eta_q, 0.0f);
+            q[d] = q[d] >= 0? q1: -q1;
+        }
+
         if(do_nmf)
         {
-            p[d] = max(p[d], (mf_float)0.0);
-            q[d] = max(q[d], (mf_float)0.0);
+            p[d] = max(p[d], (mf_float)0.0f);
+            q[d] = max(q[d], (mf_float)0.0f);
         }
     }
 
@@ -390,7 +427,10 @@ void sg(vector<mf_node*> &ptrs, mf_model &model, Scheduler &sched,
     mf_float * Q = model.Q;
 
 #if defined USESSE
-    __m128 XMMlambda = _mm_set1_ps(param.lambda);
+    __m128 XMMlambda_p1 = _mm_set1_ps(param.lambda_p1);
+    __m128 XMMlambda_q1 = _mm_set1_ps(param.lambda_q1);
+    __m128 XMMlambda_p2 = _mm_set1_ps(param.lambda_p2);
+    __m128 XMMlambda_q2 = _mm_set1_ps(param.lambda_q2);
     __m128 XMMeta = _mm_set1_ps(param.eta);
     __m128 XMMrk_slow = _mm_set1_ps(1.0/kALIGN);
     __m128 XMMrk_fast = _mm_set1_ps(1.0/(model.k-kALIGN));
@@ -440,16 +480,16 @@ void sg(vector<mf_node*> &ptrs, mf_model &model, Scheduler &sched,
                     break;
             }
 
-            sg_update(p, q, pG, qG, 0, kALIGN, XMMeta, XMMlambda, 
-                      XMMz, XMMrk_slow, param.do_nmf);
+            sg_update(p, q, pG, qG, 0, kALIGN, XMMeta, XMMlambda_p1, XMMlambda_q1,
+                      XMMlambda_p2, XMMlambda_q2, XMMz, XMMrk_slow, param.do_nmf);
 
             if(slow_only)
                 continue;
 
             pG++;
             qG++;
-            sg_update(p, q, pG, qG, kALIGN, model.k, XMMeta, XMMlambda, 
-                      XMMz, XMMrk_fast, param.do_nmf);
+            sg_update(p, q, pG, qG, kALIGN, model.k, XMMeta, XMMlambda_p1, XMMlambda_q1,
+                      XMMlambda_p2, XMMlambda_q2, XMMz, XMMrk_fast, param.do_nmf);
         }
         mf_double loss;
         _mm_store_sd(&loss, XMMloss);
@@ -571,7 +611,9 @@ void sg(vector<mf_node*> &ptrs, mf_model &model, Scheduler &sched,
             }
 
             sg_update(p, q, pG, qG, 0, kALIGN, param.eta, 
-                      param.lambda, z, rk_slow, param.do_nmf);
+                      param.lambda_p1, param.lambda_q1,
+                      param.lambda_p2, param.lambda_q2,
+                      z, rk_slow, param.do_nmf);
 
             if(slow_only)
                 continue;
@@ -580,7 +622,9 @@ void sg(vector<mf_node*> &ptrs, mf_model &model, Scheduler &sched,
             qG++;
 
             sg_update(p, q, pG, qG, kALIGN, model.k, param.eta, 
-                      param.lambda, z, rk_fast, param.do_nmf);
+                      param.lambda_p1, param.lambda_q1,
+                      param.lambda_p2, param.lambda_q2,
+                      z, rk_fast, param.do_nmf);
 
         }
         sched.put_job(block, loss);
@@ -598,7 +642,10 @@ public:
     vector<mf_node*> grid_problem(mf_problem &prob, mf_int nr_bins);
     mf_float calc_std_dev(mf_problem &prob);
     void scale_problem(mf_problem &prob, mf_float scale);
-    mf_double calc_reg(mf_model &model, vector<mf_int> &omega_p, vector<mf_int> &omega_q);
+    mf_double calc_reg1(mf_model &model, mf_float lambda_p, mf_float lambda_q,
+            vector<mf_int> &omega_p, vector<mf_int> &omega_q);
+    mf_double calc_reg2(mf_model &model, mf_float lambda_p, mf_float lambda_q,
+            vector<mf_int> &omega_p, vector<mf_int> &omega_q);
     mf_double calc_loss(mf_node *R, mf_long size, mf_model const &model);
     string get_criterion_legend();
     mf_double get_criterion(mf_double const loss, mf_long const size);
@@ -708,9 +755,30 @@ mf_float Utility::inner_product(mf_float *p, mf_float *q, mf_int k)
 #endif
 }
 
-mf_double Utility::calc_reg(mf_model &model, vector<mf_int> &omega_p, vector<mf_int> &omega_q)
+mf_double Utility::calc_reg1(mf_model &model, mf_float lambda_p, mf_float lambda_q,
+        vector<mf_int> &omega_p, vector<mf_int> &omega_q)
 {
-    auto calc_reg1 = [&] (mf_float *ptr, mf_int size, vector<mf_int> &omega)
+    auto calc_reg1_core = [&] (mf_float *ptr, mf_int size, vector<mf_int> &omega)
+    {
+        mf_double reg = 0;
+        for(mf_int i = 0; i < size; i++)
+        {
+            mf_float tmp = 0; 
+            for(mf_int j = 0; j < model.k; j++)
+                tmp += abs(ptr[i*model.k+j]);
+            reg += omega[i]*tmp;
+        }
+        return reg;
+    };
+
+    return lambda_p*calc_reg1_core(model.P, model.m, omega_p)+
+           lambda_q*calc_reg1_core(model.Q, model.n, omega_q);
+}
+
+mf_double Utility::calc_reg2(mf_model &model, mf_float lambda_p, mf_float lambda_q,
+        vector<mf_int> &omega_p, vector<mf_int> &omega_q)
+{
+    auto calc_reg2_core = [&] (mf_float *ptr, mf_int size, vector<mf_int> &omega)
     {
         mf_double reg = 0;
 #if defined USEOMP
@@ -725,8 +793,8 @@ mf_double Utility::calc_reg(mf_model &model, vector<mf_int> &omega_p, vector<mf_
         return reg;
     };
 
-    return calc_reg1(model.P, model.m, omega_p) + 
-           calc_reg1(model.Q, model.n, omega_q);
+    return lambda_p*calc_reg2_core(model.P, model.m, omega_p) + 
+           lambda_q*calc_reg2_core(model.Q, model.n, omega_q);
 }
 
 mf_double Utility::calc_loss(mf_node *R, mf_long size, mf_model const &model)
@@ -1092,7 +1160,10 @@ shared_ptr<mf_model> fpsg(
 
     util.scale_problem(*tr, 1.0/std_dev);
     util.scale_problem(*va, 1.0/std_dev);
-    param.lambda /= std_dev;
+    param.lambda_p2 /= std_dev;
+    param.lambda_q2 /= std_dev;
+    param.lambda_p1 /= pow(std_dev, 1.5);
+    param.lambda_q1 /= pow(std_dev, 1.5);
 
     Scheduler sched(param.nr_bins, param.nr_threads, cv_blocks);
 
@@ -1140,8 +1211,10 @@ shared_ptr<mf_model> fpsg(
 
         if(!param.quiet)
         {
-            mf_double reg = util.calc_reg(*model, omega_p, omega_q)*
-                            param.lambda*std_dev*std_dev;
+            mf_double reg = util.calc_reg1(*model, param.lambda_p1, param.lambda_q1,
+                            omega_p, omega_q)*std_dev*std_dev+
+                            util.calc_reg2(*model, param.lambda_p2, param.lambda_q2,
+                            omega_p, omega_q)*std_dev*std_dev;
 
             mf_double tr_loss = sched.get_loss()*std_dev*std_dev;
 
@@ -1418,7 +1491,10 @@ mf_parameter mf_get_default_param()
     param.nr_threads = 12;
     param.nr_bins = 20;
     param.nr_iters = 20;
-    param.lambda = 0.1f;
+    param.lambda_p1 = 0.0f;
+    param.lambda_q1 = 0.0f;
+    param.lambda_p2 = 0.1f;
+    param.lambda_q2 = 0.1f;
     param.eta = 0.1f;
     param.do_nmf = false;
     param.quiet = false;

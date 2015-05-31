@@ -36,7 +36,10 @@ struct mf_parameter
     mf_int nr_threads;
     mf_int nr_bins;
     mf_int nr_iters;
-    mf_float lambda; 
+    mf_float lambda_p1;
+    mf_float lambda_p2;
+    mf_float lambda_q1;
+    mf_float lambda_q2;
     mf_float eta;
     mf_int do_nmf;
     mf_int quiet; 
