@@ -295,7 +295,10 @@ inline void sg_update(
     mf_int d_begin,
     mf_int d_end,
     __m256 &XMMeta,
-    __m256 &XMMlambda,
+    __m256 &XMMlambda_p1,
+    __m256 &XMMlambda_q1,
+    __m256 &XMMlambda_p2,
+    __m256 &XMMlambda_q2,
     __m256 &XMMe,
     __m256 &XMMrk,
     bool do_nmf)
@@ -314,9 +317,9 @@ inline void sg_update(
         __m256 XMMp = _mm256_load_ps(p+d);
         __m256 XMMq = _mm256_load_ps(q+d);
 
-        __m256 XMMpg = _mm256_sub_ps(_mm256_mul_ps(XMMlambda, XMMp),
+        __m256 XMMpg = _mm256_sub_ps(_mm256_mul_ps(XMMlambda_p2, XMMp),
                                   _mm256_mul_ps(XMMe, XMMq));
-        __m256 XMMqg = _mm256_sub_ps(_mm256_mul_ps(XMMlambda, XMMq),
+        __m256 XMMqg = _mm256_sub_ps(_mm256_mul_ps(XMMlambda_q2, XMMq),
                                   _mm256_mul_ps(XMMe, XMMp));
 
         XMMpG1 = 
@@ -326,6 +329,25 @@ inline void sg_update(
 
         XMMp = _mm256_sub_ps(XMMp, _mm256_mul_ps(XMMeta_p, XMMpg));
         XMMq = _mm256_sub_ps(XMMq, _mm256_mul_ps(XMMeta_q, XMMqg));
+
+        mf_float tmp = 0;
+        _mm_store_ss(&tmp, _mm256_castps256_ps128(XMMlambda_p1));
+        if(tmp > 0)
+        {
+            __m256 XMMflip = _mm256_and_ps(_mm256_cmp_ps(XMMp, _mm256_set1_ps(0.0f), 2),
+                             _mm256_set1_ps(-0.0f));
+            XMMp = _mm256_xor_ps(XMMflip, _mm256_max_ps(_mm256_sub_ps(_mm256_xor_ps(XMMp, XMMflip),
+                   _mm256_mul_ps(XMMeta_p, XMMlambda_p1)), _mm256_set1_ps(0.0f)));
+        }
+
+        _mm_store_ss(&tmp, _mm256_castps256_ps128(XMMlambda_q1));
+        if(tmp > 0)
+        {
+            __m256 XMMflip = _mm256_and_ps(_mm256_cmp_ps(XMMq, _mm256_set1_ps(0.0f), 2),
+                             _mm256_set1_ps(-0.0f));
+            XMMq = _mm256_xor_ps(XMMflip, _mm256_max_ps(_mm256_sub_ps(_mm256_xor_ps(XMMq, XMMflip),
+                   _mm256_mul_ps(XMMeta_q, XMMlambda_q1)), _mm256_set1_ps(0.0f)));
+        }
 
         if(do_nmf)
         {
@@ -498,7 +520,10 @@ void sg(vector<mf_node*> &ptrs, mf_model &model, Scheduler &sched,
             break;
     }
 #elif defined USEAVX
-    __m256 XMMlambda = _mm256_set1_ps(param.lambda);
+    __m256 XMMlambda_p1 = _mm256_set1_ps(param.lambda_p1);
+    __m256 XMMlambda_q1 = _mm256_set1_ps(param.lambda_q1);
+    __m256 XMMlambda_p2 = _mm256_set1_ps(param.lambda_p2);
+    __m256 XMMlambda_q2 = _mm256_set1_ps(param.lambda_q2);
     __m256 XMMeta = _mm256_set1_ps(param.eta);
     __m256 XMMrk_slow = _mm256_set1_ps(1.0/kALIGN);
     __m256 XMMrk_fast = _mm256_set1_ps(1.0/(model.k-kALIGN));
@@ -550,16 +575,16 @@ void sg(vector<mf_node*> &ptrs, mf_model &model, Scheduler &sched,
                     break;
             }
 
-            sg_update(p, q, pG, qG, 0, kALIGN, XMMeta, XMMlambda, 
-                      XMMz, XMMrk_slow, param.do_nmf);
+            sg_update(p, q, pG, qG, 0, kALIGN, XMMeta, XMMlambda_p1, XMMlambda_q1,
+                      XMMlambda_p2, XMMlambda_q2, XMMz, XMMrk_slow, param.do_nmf);
 
             if(slow_only)
                 continue;
 
             pG++;
             qG++;
-            sg_update(p, q, pG, qG, kALIGN, model.k, XMMeta, XMMlambda, 
-                      XMMz, XMMrk_fast, param.do_nmf);
+            sg_update(p, q, pG, qG, kALIGN, model.k, XMMeta, XMMlambda_p1, XMMlambda_q1,
+                      XMMlambda_p2, XMMlambda_q2, XMMz, XMMrk_fast, param.do_nmf);
         }
         mf_double loss;
         _mm_store_sd(&loss, XMMloss);
