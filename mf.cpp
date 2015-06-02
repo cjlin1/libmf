@@ -1200,7 +1200,7 @@ shared_ptr<mf_model> fpsg(
         omega_q[N.v]++;
     }
 
-    bool slow_only = true;
+    bool slow_only = param.lambda_p1 == 0 && param.lambda_q1 == 0? true: false;
 
     vector<mf_float> PG(model->m*2, 1), QG(model->n*2, 1);
 
