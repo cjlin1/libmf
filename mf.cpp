@@ -475,7 +475,7 @@ void sg(vector<mf_node*> &ptrs, mf_model &model, Scheduler &sched,
             XMMz = _mm_hadd_ps(XMMz, XMMz);
 
             mf_float z = 0;
-            switch(param.fun)
+            switch(param.solver)
             {
                 case 0:
                     XMMz = _mm_sub_ps(_mm_set1_ps(N->r), XMMz);
@@ -547,7 +547,7 @@ void sg(vector<mf_node*> &ptrs, mf_model &model, Scheduler &sched,
             XMMz = _mm256_hadd_ps(XMMz, XMMz);
             
             mf_float z = 0;
-            switch(param.fun)
+            switch(param.solver)
             {
                 case 0:
                     XMMz = _mm256_sub_ps(_mm256_set1_ps(N->r-z), XMMz);
@@ -610,7 +610,7 @@ void sg(vector<mf_node*> &ptrs, mf_model &model, Scheduler &sched,
             for(mf_int d = 0; d < model.k; d++)
                 z += p[d]*q[d];
 
-            switch(param.fun)
+            switch(param.solver)
             {
                 case 0:
                     z = N->r-z;
@@ -687,12 +687,12 @@ public:
     static void shuffle_model(mf_model &model, vector<mf_int> &p_map, vector<mf_int> &q_map);
 
 private:
-    mf_int fun;
+    mf_int solver;
     mf_int nr_threads;
 };
 
-Utility::Utility(mf_int f, mf_int n):
-    fun(f), nr_threads(n)
+Utility::Utility(mf_int s, mf_int n):
+    solver(s), nr_threads(n)
 { }
 
 mf_float Utility::calc_std_dev(mf_problem &prob)
@@ -832,24 +832,39 @@ mf_double Utility::calc_loss(mf_node *R, mf_long size, mf_model const &model)
     {
         mf_node &N = R[i];
         mf_float z = mf_predict(&model, N.u, N.v);
-        if(fun == 0)
-            loss += pow(N.r-z, 2);
-        else if(fun == 1)
-            if(N.r > 0)
-                loss += log(1.0+exp(-z));
-            else
-                loss += log(1.0+exp(z));
+        switch(solver)
+        {
+            case 0:
+                loss += pow(N.r-z, 2);
+                break;
+            case 1:
+                if(N.r > 0)
+                    loss += log(1.0+exp(-z));
+                else
+                    loss += log(1.0+exp(z));
+                    break;
+             default:
+                throw invalid_argument("unsupported loss function");
+                break;
+        }
     }
     return loss;
 }
+
 string Utility::get_criterion_legend()
 {
-    if(fun == 0)
-        return string("rmse");
-    else if(fun == 1)
-        return string("logloss");
-    else
-        return string();
+    switch(solver)
+    {
+        case 0:
+            return string("rmse");
+            break;
+        case 1:
+            return string("logloss");
+            break;
+        default:
+            return string();
+            break;
+     }
 }
 
 mf_double Utility::get_criterion(mf_double const loss, mf_long const size)
@@ -857,10 +872,18 @@ mf_double Utility::get_criterion(mf_double const loss, mf_long const size)
     if(size == 0)
         return 0;
 
-    if(fun == 0)
-        return sqrt(loss/size);
-    else
-        return loss/size;
+    switch(solver)
+    {
+        case 0:
+            return sqrt(loss/size);
+            break;
+        case 1:
+            return loss/size;
+            break;
+        default:
+            throw invalid_argument("unsupported loss function");
+            break;
+    }
 }
 
 mf_double Utility::get_criterion(mf_problem const &prob, mf_model const &model)
@@ -1145,7 +1168,7 @@ shared_ptr<mf_model> fpsg(
     mf_long *cv_count=nullptr)
 {
     param.nr_bins = max(param.nr_bins, 2*param.nr_threads);
-    Utility util(param.fun, param.nr_threads);
+    Utility util(param.solver, param.nr_threads);
 
     shared_ptr<mf_problem> tr, va;
     if(param.copy_data)
@@ -1181,7 +1204,7 @@ shared_ptr<mf_model> fpsg(
     shared_ptr<mf_model> model(Utility::init_model(tr, param.k, k_aligned), 
                                [] (mf_model *ptr) { mf_destroy_model(&ptr); });
 
-    mf_float std_dev = param.fun != 0? 1: max((mf_float)1e-4, util.calc_std_dev(*tr));
+    mf_float std_dev = param.solver != 0? 1: max((mf_float)1e-4, util.calc_std_dev(*tr));
 
     util.scale_problem(*tr, 1.0/std_dev);
     util.scale_problem(*va, 1.0/std_dev);
@@ -1276,9 +1299,6 @@ shared_ptr<mf_model> fpsg(
 
     mf_double loss = util.calc_loss(tr->R, tr->nnz, *model)*std_dev*std_dev;
 
-    if(!param.quiet)
-        cout << "real tr_rmse = " << fixed << setprecision(4) << sqrt(loss/tr->nnz) << endl;
-
     if(cv_loss != nullptr && cv_count != nullptr)
     {
         *cv_loss = 0;
@@ -1349,6 +1369,8 @@ mf_float mf_cross_validation(
     mf_int nr_bins = param.nr_bins;
     mf_int nr_blocks_per_fold = nr_bins*nr_bins/nr_folds;
 
+    Utility util(param.solver, param.nr_threads);
+
     srand(0);
     vector<mf_int> cv_blocks;
     for(mf_int block = 0; block < nr_bins*nr_bins; block++)
@@ -1360,7 +1382,7 @@ mf_float mf_cross_validation(
         cout.width(4);
         cout << "fold";
         cout.width(10);
-        cout << "rmse";
+        cout << util.get_criterion_legend();
         cout << endl;
     }
 
@@ -1370,7 +1392,7 @@ mf_float mf_cross_validation(
     for(mf_int fold = 0; fold < nr_folds; fold++)
     {
         mf_int begin = fold*nr_blocks_per_fold;
-        mf_int end= min((fold+1)*nr_blocks_per_fold, nr_bins*nr_bins);
+        mf_int end = min((fold+1)*nr_blocks_per_fold, nr_bins*nr_bins);
 
         vector<mf_int> cv_blocks1(cv_blocks.begin()+begin, 
                                   cv_blocks.begin()+end);
@@ -1380,7 +1402,7 @@ mf_float mf_cross_validation(
 
         fpsg(prob, nullptr, param, cv_blocks1, &loss1, &count1);
 
-        mf_float rmse1 = sqrt(loss1/count1);
+        mf_float rmse1 = util.get_criterion(loss1, count1);
 
         if(!quiet)
         {
@@ -1394,7 +1416,8 @@ mf_float mf_cross_validation(
         loss += loss1;
         count += count1;
     }
-    mf_float rmse = sqrt(loss/count);
+
+    mf_float rmse = util.get_criterion(loss, count);
 
     if(!quiet)
     {
@@ -1524,7 +1547,7 @@ mf_parameter mf_get_default_param()
     param.do_nmf = false;
     param.quiet = false;
     param.copy_data = true;
-    param.fun = 0;
+    param.solver = 0;
 
     return param;
 }

@@ -29,9 +29,9 @@ string train_help()
 "options:\n"
 "-l1 <lambda_1>: set L1-regularization parameter (default 0)\n"
 "-l2 <lambda_2>: set L2-regularization parameter (default 0.1)\n"
-"-f <fun>: specify the loss function (default 0)\n"
-"     0 -- square loss,\n"
-"     1 -- logistic loss\n"
+"-f <fun>: specify the solver type (default 0)\n"
+"     0 -- square loss matrix factorization\n"
+"     1 -- logistic loss matrix factorization\n"
 "-k <dimensions>: set number of dimensions (default 8)\n"
 "-t <iter>: set number of iterations (default 20)\n"
 "-r <eta>: set learning rate (default 0.1)\n"
@@ -146,11 +146,11 @@ Option parse_option(int argc, char **argv)
         else if(args[i].compare("-f") == 0)
         {
             if(i == argc-1)
-                throw invalid_argument("need to specify the loss function after -f");
+                throw invalid_argument("need to specify the solver after -f");
             i++;
-            option.param.fun = stoi(args[i]);
-            if(option.param.fun != 0 && option.param.fun != 1)
-                throw invalid_argument("only square loss (0) and logistic loss (1) are supported");
+            option.param.solver = stoi(args[i]);
+            if(option.param.solver != 0 && option.param.solver != 1)
+                throw invalid_argument("unsupported solver");
         }
         else if(args[i].compare("--nmf") == 0)
         {

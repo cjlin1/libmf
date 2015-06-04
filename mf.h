@@ -44,7 +44,7 @@ struct mf_parameter
     mf_int do_nmf;
     mf_int quiet; 
     mf_int copy_data;
-    mf_int fun;
+    mf_int solver;
 };
 
 struct mf_parameter mf_get_default_param();
