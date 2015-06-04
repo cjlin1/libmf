@@ -27,8 +27,10 @@ string train_help()
 "usage: mf-train [options] training_set_file [model_file]\n"
 "\n"
 "options:\n"
-"-l1 <lambda_1>: set L1-regularization parameter (default 0)\n"
-"-l2 <lambda_2>: set L2-regularization parameter (default 0.1)\n"
+"-l1 <lambda>,<lambda>: set L1-regularization parameters of P and Q (default 0)\n"
+"     P and Q share the same lambda if only one lambda is spceified.\n"
+"-l2 <lambda>,<lambda>: set L2-regularization parameters of P and Q (default 0.1)\n"
+"     P and Q share the same lambda if only one lambda is spceified.\n"
 "-f <fun>: specify the solver type (default 0)\n"
 "     0 -- square loss matrix factorization\n"
 "     1 -- logistic loss matrix factorization\n"
@@ -69,9 +71,11 @@ Option parse_option(int argc, char **argv)
             option.param.lambda_q1 = stof(pch);
             pch = strtok(NULL, ",");
             if(pch != NULL)
+            {
                 if(stof(pch) < 0)
                     throw invalid_argument("regularization coefficient should be non-negative");
                 option.param.lambda_q1 = stof(pch);
+            }
         }
         else if(args[i].compare("-l2") == 0)
         {
@@ -86,9 +90,11 @@ Option parse_option(int argc, char **argv)
             option.param.lambda_q2 = stof(pch);
             pch = strtok(NULL, ",");
             if(pch != NULL)
+            {
                 if(stof(pch) < 0)
                     throw invalid_argument("regularization coefficient should be non-negative");
                 option.param.lambda_q2 = stof(pch);
+            }
         }
         else if(args[i].compare("-k") == 0)
         {
