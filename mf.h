@@ -80,6 +80,8 @@ mf_float mf_cross_validation(
 
 mf_float mf_predict(struct mf_model const *model, mf_int p_idx, mf_int q_idx);
 
+mf_problem read_problem(std::string path);
+
 #ifdef __cplusplus
 } // namespace mf
 

@@ -14,6 +14,10 @@
 #include <string>
 #include <memory>
 #include <set>
+#include <list>
+#include <utility>
+#include <cmath>
+#include <stdexcept>
 
 #include "mf.h"
 
@@ -676,7 +680,10 @@ public:
     mf_double get_criterion(mf_double const loss, mf_long const size);
     mf_double get_criterion(mf_problem const &prob, mf_model const &model);
     void scale_model(mf_model &model, mf_float scale);
-
+	pair<mf_double, mf_double> calc_mpr_auc(mf_problem *prob, mf_model &model, bool transpose);
+	mf_double calc_rmse(mf_problem *prob, mf_model &model);
+	mf_double calc_logloss(mf_problem *prob, mf_model &model);
+	
     static mf_problem* copy_problem(mf_problem const *prob, bool copy_data);
     static vector<mf_int> gen_random_map(mf_int size);
     static mf_float* malloc_aligned_float(mf_long size);
@@ -841,8 +848,8 @@ mf_double Utility::calc_loss(mf_node *R, mf_long size, mf_model const &model)
                 if(N.r > 0)
                     loss += log(1.0+exp(-z));
                 else
-                    loss += log(1.0+exp(z));
-                    break;
+					loss += log(1.0+exp(z));
+				break;
              default:
                 throw invalid_argument("unsupported loss function");
                 break;
@@ -879,23 +886,203 @@ mf_double Utility::get_criterion(mf_double const loss, mf_long const size)
             break;
         case 1:
             return loss/size;
-            break;
-        default:
-            throw invalid_argument("unsupported loss function");
-            break;
-    }
+			break;
+		default:
+			throw invalid_argument("unsupported loss function");
+			break;
+	}
 }
 
 mf_double Utility::get_criterion(mf_problem const &prob, mf_model const &model)
 {
-    if(prob.nnz == 0)
-        return 0;
+	if(prob.nnz == 0)
+		return 0;
 
-    mf_double loss = calc_loss(prob.R, prob.nnz, model);
+	mf_double loss = calc_loss(prob.R, prob.nnz, model);
 
-    return get_criterion(loss, prob.nnz);
+	return get_criterion(loss, prob.nnz);
 }
 
+pair<mf_double, mf_double> Utility::calc_mpr_auc(mf_problem *prob, mf_model &model, bool transpose)
+{
+	mf_int mf_node::*row_ptr;
+	mf_int mf_node::*col_ptr;
+	mf_int m, n;
+	if(!transpose)
+	{
+		row_ptr = &mf_node::u;
+		col_ptr = &mf_node::v;
+		m = prob->m;
+		n = prob->n;
+	}
+	else
+	{
+		row_ptr = &mf_node::v;
+		col_ptr = &mf_node::u;
+		m = prob->n;
+		n = prob->m;
+	}
+	auto sort_by = [&] (mf_node const &lhs, mf_node const &rhs)
+	{ return tie(lhs.*row_ptr, lhs.*col_ptr) < tie(rhs.*row_ptr, rhs.*col_ptr); };
+	sort(prob->R, prob->R+prob->nnz, sort_by);
+
+	auto sort_by_pred = [&] (pair<mf_node, mf_float> const &lhs, pair<mf_node, mf_float> const &rhs)
+	{ return lhs.second < rhs.second; };
+
+	vector<mf_int> pos_cnts(m+1, 0);
+	for(int i = 0; i < prob->nnz; i++)
+		pos_cnts[prob->R[i].*row_ptr+1]++;
+	for(int i = 1; i < m+1; i++)
+		pos_cnts[i] += pos_cnts[i-1];
+
+	mf_float all_u_mpr = 0;
+	mf_float all_u_auc = 0;
+
+#if defined USEOMP
+#pragma omp parallel for num_threads(nr_threads) schedule(static) reduction(+: all_u_mpr, all_u_auc)
+#endif
+
+	for(int i = 0; i < m; i++)
+	{
+		if(pos_cnts[i+1]-pos_cnts[i] < 1) // skip this user has no rating in the validation set
+			continue;
+
+		vector<pair<mf_node, mf_float>> row(n); // the u-th user's nodes and their prediction values
+
+		// assume all ratings are all zero and calculate their prediction values
+		for(int j = 0; j < n; j++)
+		{
+			mf_node N;
+			N.*row_ptr = i;
+			N.*col_ptr = j;
+			N.r = 0;
+			row[j] = make_pair(N, mf_predict(&model, N.u, N.v));
+		}
+
+		mf_int neg = 0; // # of encountered negative instances
+		mf_int pos = 0; // # of encountered positive instances
+		mf_double u_mpr = 0; // expectation of the rank of a positive item with regarding to all negative items
+		mf_double u_auc = 0;
+
+		if(pos_cnts[i+1]-pos_cnts[i] < 100) //cnt_threshold for speed-up
+		{
+			// copy ratings in the validation set to the row
+			mf_int index[pos_cnts[i+1]-pos_cnts[i]]; //index of positive nodes
+			for(int j = pos_cnts[i]; j < pos_cnts[i+1]; j++)
+			{
+				if(prob->R[j].r > 0)
+				{
+					int col = prob->R[j].*col_ptr;
+					row[col].first.r = prob->R[j].r;
+					index[pos] = col;
+					pos++;
+				}
+			}
+			neg = n - pos;
+			int count = 0;
+			for(int k = 0; k < pos; k++)
+			{
+				swap(row[count], row[index[k]]);
+				count++;
+			}	
+			sort(row.begin(), row.begin()+pos, sort_by_pred);
+
+			for(auto neg_it = row.begin()+pos; neg_it != row.end(); neg_it++)
+			{
+				mf_int accu = 0;
+				for(auto pos_it = row.begin(); pos_it != row.begin()+pos; pos_it++)
+				{
+					if(neg_it->second > pos_it->second)
+						accu++;
+					else
+						break;
+				}
+				u_mpr += accu;
+				u_auc += pos - accu;
+			}
+
+			if(neg > 0 && pos > 0)
+			{
+				u_mpr /= neg;
+				u_auc /= neg*pos;
+				all_u_mpr += u_mpr;
+				all_u_auc += u_auc;
+			}
+		}
+		else
+		{
+			// copy ratings in the validation set to the row
+			for(int j = pos_cnts[i]; j < pos_cnts[i+1]; j++)
+				row[prob->R[j].*col_ptr].first.r = prob->R[j].r;
+
+			// sort the u-th user's nodes by their prediction values
+			sort(row.begin(), row.end(), sort_by_pred);
+
+			// scan the sorted nodes
+			for(auto current = row.begin(); current != row.end(); current++)// go through the items from low score to high score
+			{
+				if(current->first.r > 0) // a positive instance
+				{
+					u_auc += neg;
+					pos++;
+				}
+				else // a negative instace
+				{
+					u_mpr += pos; // for all positive items before the negative item, ranks are reduced by 1
+					neg++;
+				}
+			}
+
+			if(neg > 0)
+			{
+				u_mpr /= neg; // sum of the percentile rank of the u-th user's positive instances
+				u_auc /= neg*pos;
+				all_u_mpr += u_mpr; // sum of u_mpr for all users
+				all_u_auc += u_auc;
+			}
+		}
+	}
+	all_u_mpr /= prob->nnz;
+	all_u_auc /= m;
+	return make_pair(all_u_mpr, all_u_auc);
+}
+
+mf_double Utility::calc_rmse(mf_problem *prob, mf_model &model)
+{
+	if(prob->nnz == 0)
+		return 0;
+	mf_double loss = 0;
+#if defined USEOMP
+#pragma omp parallel for num_threads(nr_threads) schedule(static) reduction(+:loss)
+#endif
+	for(mf_long i = 0; i < prob->nnz; i++)
+	{
+		mf_node &N = prob->R[i];
+		mf_float e = N.r - mf_predict(&model, N.u, N.v);
+		loss += e*e;
+	}
+	return sqrt(loss/prob->nnz);
+}
+
+mf_double Utility::calc_logloss(mf_problem *prob, mf_model &model)
+{
+	if(prob->nnz == 0)
+		return 0;
+	mf_double logloss = 0;
+#if defined USEOMP
+#pragma omp parallel for num_threads(nr_threads) schedule(static) reduction(+:logloss)
+#endif
+	for(mf_long i = 0; i < prob->nnz; i++)
+	{
+		mf_node &N = prob->R[i];
+		mf_float z = mf_predict(&model, N.u, N.v);
+		if(N.r > 0)
+			logloss += log(1.0+exp(-z));
+		else
+			logloss += log(1.0+exp(z));
+	}
+	return logloss/prob->nnz;
+}
 void Utility::shuffle_problem(
     mf_problem &prob, 
     vector<mf_int> &p_map, 
@@ -1503,6 +1690,46 @@ mf_model* mf_load_model(char const *path)
     read(model->Q, model->n);
 
     return model;
+}
+
+mf_problem read_problem(string path)
+{
+	mf_problem prob;
+	prob.m = 0;
+	prob.n = 0;
+	prob.nnz = 0;
+	prob.R = nullptr;
+
+	if(path.empty())
+	{   
+		return prob;
+	}   
+
+	ifstream f(path);
+	if(!f.is_open())
+		throw runtime_error("cannot open " + path);
+	string line;
+	while(getline(f, line))
+		prob.nnz++;
+
+	mf_node *R = new mf_node[prob.nnz];
+
+	f.close();
+	f.open(path);
+
+	mf_long idx = 0;
+	for(mf_node N; f >> N.u >> N.v >> N.r;)
+	{
+		if(N.u+1 > prob.m)
+			prob.m = N.u+1;
+		if(N.v+1 > prob.n)
+			prob.n = N.v+1;
+		R[idx] = N;
+		idx++;
+	}
+	prob.R = R;
+
+	return prob;
 }
 
 void mf_destroy_model(mf_model **model)

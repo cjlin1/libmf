@@ -203,47 +203,6 @@ Option parse_option(int argc, char **argv)
     return option;
 }
 
-mf_problem read_problem(string path)
-{
-    mf_problem prob;
-    prob.m = 0;
-    prob.n = 0;
-    prob.nnz = 0;
-    prob.R = nullptr;
-
-    if(path.empty())
-    {
-        return prob;
-    }
-
-    ifstream f(path);
-    if(!f.is_open())
-        throw runtime_error("cannot open " + path);
-    string line;
-    while(getline(f, line))
-        prob.nnz++;
-
-    mf_node *R = new mf_node[prob.nnz];
-
-    f.close();
-    f.open(path);
-
-    mf_long idx = 0;
-    for(mf_node N; f >> N.u >> N.v >> N.r;)
-    {
-        if(N.u+1 > prob.m)
-            prob.m = N.u+1;
-        if(N.v+1 > prob.n)
-            prob.n = N.v+1;
-        R[idx] = N;
-        idx++;
-    }
-
-    prob.R = R;
-
-    return prob;
-}
-
 int main(int argc, char **argv)
 {
     Option option;
