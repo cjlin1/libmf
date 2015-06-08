@@ -15,7 +15,7 @@ using namespace mf;
 
 struct Option
 {
-    Option() : eval(2) {}
+    Option() : eval(0) {}
     string test_path, model_path, output_path;
     mf_int eval;
 };
@@ -26,11 +26,11 @@ string predict_help()
 "usage: mf-predict [options] test_file model_file [output_file]\n"
 "\n"
 "options:\n"
-"-e <eval>: specify the evaluation function (default 2)\n"
-"	0 -- auc\n"
-"	1 -- mpr\n"
-"	2 -- rmse\n"
-"	3 -- logloss\n");
+"-e <eval>: specify the evaluation criterion (default 0)\n"
+"\t 0 -- Root mean square error\n"
+"\t 1 -- Logistic error\n"
+"\t10 -- Mean percentile rank\n"
+"\t11 -- Area under ROC curve\n");
 }
 
 Option parse_option(int argc, char **argv)
@@ -50,16 +50,15 @@ Option parse_option(int argc, char **argv)
         if(args[i].compare("-e") == 0)
         {
             if((i+1) >= argc)
-                throw invalid_argument("need to specify evaluation function after -d");
+                throw invalid_argument("need to specify evaluation criterion after -e");
             i++;
             option.eval = stoi(args[i]);
-            if(option.eval > 3 || option.eval < 0)
-                throw invalid_argument("unknown evaluation function");
+            if(option.eval != RMSE && option.eval != LOGLOSS &&
+               option.eval != AUC  && option.eval != MPR)
+                throw invalid_argument("unknown evaluation criterion");
         }
         else
-        {
             break;
-        }
     }
     if(i >= argc-1)
         throw invalid_argument("testing data and model file not specified");
@@ -95,7 +94,7 @@ void predict(string test_path, string model_path, string output_path, mf_int eva
     if(!f_out.is_open())
         throw runtime_error("cannot open " + output_path);
 
-    mf_model *model = mf_load_model(model_path.c_str());
+    mf_model *model = mf_load_model(model_path.c_str()); // use shared_ptr?
     if(model == nullptr)
         throw runtime_error("cannot load model from " + model_path);
 
@@ -104,36 +103,42 @@ void predict(string test_path, string model_path, string output_path, mf_int eva
         mf_float r = mf_predict(model, prob.R[i].u, prob.R[i].v);
         f_out << r << endl;
     }
+
     switch(eval)
     {
-        case 0:
+        case RMSE:
         {
-            auto row_wise_auc = calc_mpr_auc(&prob, *model, false);
-            auto col_wise_auc = calc_mpr_auc(&prob, *model, true);
-            cout << fixed << setprecision(4) <<  "AUC = (" << row_wise_auc.second << ", " << col_wise_auc.second << ")" << endl;
-            break;
-        }
-        case 1:
-        {
-            auto row_wise_mpr = calc_mpr_auc(&prob, *model, false);
-            auto col_wise_mpr = calc_mpr_auc(&prob, *model, true);
-            cout << fixed << setprecision(4) <<  "MPR = (" << row_wise_mpr.first << ", " << col_wise_mpr.first << ")" << endl;
-            break;
-        }
-        case 2:
-        {    
-            auto rmse = calc_rmse(&prob, *model);
+            auto rmse = calc_rmse(&prob, model);
             cout << fixed << setprecision(4) << "RMSE = " << rmse << endl;
             break;
         }
-        case 3:
+        case LOGLOSS:
         {
-            auto logloss = calc_logloss(&prob, *model);
+            auto logloss = calc_logloss(&prob, model);
             cout << fixed << setprecision(4) << "LOGLOSS = " << logloss << endl;
             break;
         }
-        default:
+        case AUC:
+        {
+            auto row_wise_auc = calc_auc(&prob, model, false);
+            auto col_wise_auc = calc_auc(&prob, model, true);
+            cout << fixed << setprecision(4) <<  "Row-wise AUC = " << row_wise_auc << endl;
+            cout << fixed << setprecision(4) <<  "Colmn-wise AUC = " << col_wise_auc << endl;
             break;
+        }
+        case MPR:
+        {
+            auto row_wise_mpr = calc_mpr(&prob, model, false);
+            auto col_wise_mpr = calc_mpr(&prob, model, true);
+            cout << fixed << setprecision(4) <<  "Row-wise MPR = " << row_wise_mpr << endl;
+            cout << fixed << setprecision(4) <<  "Column-wise MPR = " << col_wise_mpr << endl;
+            break;
+        }
+        default:
+        {
+            throw invalid_argument("unknown evaluation criterion");
+            break;
+        }
     }
     mf_destroy_model(&model);
 }

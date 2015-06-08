@@ -27,13 +27,21 @@ string train_help()
 "usage: mf-train [options] training_set_file [model_file]\n"
 "\n"
 "options:\n"
-"-l1 <lambda>,<lambda>: set L1-regularization parameters of P and Q (default 0)\n"
-"     P and Q share the same lambda if only one lambda is spceified.\n"
+"-l1 <lambda>,<lambda>: set L1-regularization parameters for P and Q (default 0)\n"
+"  P and Q share the same lambda if only one lambda is spceified.\n"
 "-l2 <lambda>,<lambda>: set L2-regularization parameters of P and Q (default 0.1)\n"
-"     P and Q share the same lambda if only one lambda is spceified.\n"
-"-f <fun>: specify the solver type (default 0)\n"
-"     0 -- square loss matrix factorization\n"
-"     1 -- logistic loss matrix factorization\n"
+"  P and Q share the same lambda if only one lambda is spceified.\n"
+"-x <solver>: specify the type of solver (default 0)\n"
+"  for numerical matrix factorization\n"
+"\t 0 -- square loss matrix factorization\n"
+"  for binary matrix factorization\n"
+"\t 5 -- Logistic matrix factorization\n"
+"\t 6 -- Square hinge matrix factorization\n"
+"  for one-class matrix factorization\n"
+"\t10 -- Row-oriented bayesian personalized ranking\n"
+"\t11 -- Column-oriented bayesian personalized ranking\n"
+"\t12 -- Row-oriented one-class collaborative filtering\n"
+"\t13 -- Column-oriented one-class collaborative filtering\n"
 "-k <dimensions>: set number of dimensions (default 8)\n"
 "-t <iter>: set number of iterations (default 20)\n"
 "-r <eta>: set learning rate (default 0.1)\n"
@@ -149,14 +157,20 @@ Option parse_option(int argc, char **argv)
                 throw invalid_argument("number of folds should be larger than 1");
             option.do_cv = true;
         }
-        else if(args[i].compare("-f") == 0)
+        else if(args[i].compare("-x") == 0)
         {
             if(i == argc-1)
-                throw invalid_argument("need to specify the solver after -f");
+                throw invalid_argument("need to specify the type of solver after -x");
             i++;
             option.param.solver = stoi(args[i]);
-            if(option.param.solver != 0 && option.param.solver != 1)
-                throw invalid_argument("unsupported solver");
+            if(option.param.solver != SQ_MF &&
+               option.param.solver != LR_MF &&
+               option.param.solver != SQ_HINGE_MF &&
+               option.param.solver != ROW_BPR &&
+               option.param.solver != COL_BPR &&
+               option.param.solver != ROW_OCCF &&
+               option.param.solver != COL_OCCF)
+                throw invalid_argument("unknown solver type");
         }
         else if(args[i].compare("--nmf") == 0)
         {

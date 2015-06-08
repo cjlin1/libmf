@@ -481,12 +481,12 @@ void sg(vector<mf_node*> &ptrs, mf_model &model, Scheduler &sched,
             mf_float z = 0;
             switch(param.solver)
             {
-                case 0:
+                case SQ_MF:
                     XMMz = _mm_sub_ps(_mm_set1_ps(N->r), XMMz);
                     XMMloss = _mm_add_pd(XMMloss, _mm_cvtps_pd(
                               _mm_mul_ps(XMMz, XMMz)));
                     break;
-                case 1:
+                case LR_MF:
                     _mm_store_ss(&z, XMMz);
                     if(N->r > 0)
                     {
@@ -502,7 +502,7 @@ void sg(vector<mf_node*> &ptrs, mf_model &model, Scheduler &sched,
                     }
                     break;
                 default:
-                    throw invalid_argument("unsupported loss function");
+                    throw invalid_argument("unknown loss function");
                     break;
             }
 
@@ -553,13 +553,13 @@ void sg(vector<mf_node*> &ptrs, mf_model &model, Scheduler &sched,
             mf_float z = 0;
             switch(param.solver)
             {
-                case 0:
+                case SQ_MF:
                     XMMz = _mm256_sub_ps(_mm256_set1_ps(N->r-z), XMMz);
                     XMMloss = _mm_add_pd(XMMloss,
                               _mm_cvtps_pd(_mm256_castps256_ps128(
                               _mm256_mul_ps(XMMz, XMMz))));
                     break;
-                case 1:
+                case LR_MF:
                     _mm_store1_ps(&z, _mm256_castps256_ps128(XMMz));
                     if(N->r > 0)
                     {
@@ -575,7 +575,7 @@ void sg(vector<mf_node*> &ptrs, mf_model &model, Scheduler &sched,
                     }
                     break;
                 default:
-                    throw invalid_argument("unsupported loss function");
+                    throw invalid_argument("unknown loss function");
                     break;
             }
 
@@ -616,11 +616,11 @@ void sg(vector<mf_node*> &ptrs, mf_model &model, Scheduler &sched,
 
             switch(param.solver)
             {
-                case 0:
+                case SQ_MF:
                     z = N->r-z;
                     loss += z*z;
                     break;
-                case 1:
+                case LR_MF:
                     if(N->r > 0)
                     {
                         z = exp(-z);
@@ -635,7 +635,7 @@ void sg(vector<mf_node*> &ptrs, mf_model &model, Scheduler &sched,
                     }
                     break;
                  default:
-                    throw invalid_argument("unsupported loss function");
+                    throw invalid_argument("unknown loss function");
                     break;
             }
 
@@ -838,17 +838,17 @@ mf_double Utility::calc_loss(mf_node *R, mf_long size, mf_model const &model)
         mf_float z = mf_predict(&model, N.u, N.v);
         switch(solver)
         {
-            case 0:
+            case SQ_MF:
                 loss += pow(N.r-z, 2);
                 break;
-            case 1:
+            case LR_MF:
                 if(N.r > 0)
                     loss += log(1.0+exp(-z));
                 else
                     loss += log(1.0+exp(z));
                 break;
              default:
-                throw invalid_argument("unsupported loss function");
+                throw invalid_argument("unknown loss function");
                 break;
         }
     }
@@ -859,10 +859,10 @@ string Utility::get_criterion_legend()
 {
     switch(solver)
     {
-        case 0:
+        case SQ_MF:
             return string("rmse");
             break;
-        case 1:
+        case LR_MF:
             return string("logloss");
             break;
         default:
@@ -878,14 +878,14 @@ mf_double Utility::get_criterion(mf_double const loss, mf_long const size)
 
     switch(solver)
     {
-        case 0:
+        case SQ_MF:
             return sqrt(loss/size);
             break;
-        case 1:
+        case LR_MF:
             return loss/size;
             break;
         default:
-            throw invalid_argument("unsupported loss function");
+            throw invalid_argument("unknown loss function");
             break;
     }
 }
@@ -1572,10 +1572,47 @@ mf_float mf_predict(mf_model const *model, mf_int u, mf_int v)
     mf_float *p = model->P+(mf_long)u*model->k;
     mf_float *q = model->Q+(mf_long)v*model->k;
 
-    return std::inner_product(p, p+model->k, q, (mf_float)0);
+    return inner_product(p, p+model->k, q, (mf_float)0.0f);
 }
 
-pair<mf_double, mf_double> calc_mpr_auc(mf_problem *prob, mf_model &model, bool transpose)
+mf_double calc_rmse(mf_problem *prob, mf_model *model)
+{
+    if(prob->nnz == 0)
+        return 0;
+    mf_double loss = 0;
+#if defined USEOMP
+#pragma omp parallel for schedule(static) reduction(+:loss)
+#endif
+    for(mf_long i = 0; i < prob->nnz; i++)
+    {
+        mf_node &N = prob->R[i];
+        mf_float e = N.r - mf_predict(model, N.u, N.v);
+        loss += e*e;
+    }
+    return sqrt(loss/prob->nnz);
+}
+
+mf_double calc_logloss(mf_problem *prob, mf_model *model)
+{
+    if(prob->nnz == 0)
+        return 0;
+    mf_double logloss = 0;
+#if defined USEOMP
+#pragma omp parallel for schedule(static) reduction(+:logloss)
+#endif
+    for(mf_long i = 0; i < prob->nnz; i++)
+    {
+        mf_node &N = prob->R[i];
+        mf_float z = mf_predict(model, N.u, N.v);
+        if(N.r > 0)
+            logloss += log(1.0+exp(-z));
+        else
+            logloss += log(1.0+exp(z));
+    }
+    return logloss/prob->nnz;
+}
+
+pair<mf_double, mf_double> calc_mpr_auc(mf_problem *prob, mf_model *model, bool transpose)
 {
     mf_int mf_node::*row_ptr;
     mf_int mf_node::*col_ptr;
@@ -1594,17 +1631,19 @@ pair<mf_double, mf_double> calc_mpr_auc(mf_problem *prob, mf_model &model, bool 
         m = prob->n;
         n = prob->m;
     }
-    auto sort_by = [&] (mf_node const &lhs, mf_node const &rhs)
-    { return tie(lhs.*row_ptr, lhs.*col_ptr) < tie(rhs.*row_ptr, rhs.*col_ptr); };
-    sort(prob->R, prob->R+prob->nnz, sort_by);
 
-    auto sort_by_pred = [&] (pair<mf_node, mf_float> const &lhs, pair<mf_node, mf_float> const &rhs)
-    { return lhs.second < rhs.second; };
+    auto sort_by_id = [&] (mf_node const &lhs, mf_node const &rhs)
+        { return tie(lhs.*row_ptr, lhs.*col_ptr) < tie(rhs.*row_ptr, rhs.*col_ptr); };
+
+    sort(prob->R, prob->R+prob->nnz, sort_by_id);
+
+    auto sort_by_pred = [&] (pair<mf_node, mf_float> const &lhs,
+        pair<mf_node, mf_float> const &rhs) { return lhs.second < rhs.second; };
 
     vector<mf_int> pos_cnts(m+1, 0);
-    for(int i = 0; i < prob->nnz; i++)
+    for(mf_int i = 0; i < prob->nnz; i++)
         pos_cnts[prob->R[i].*row_ptr+1]++;
-    for(int i = 1; i < m+1; i++)
+    for(mf_int i = 1; i < m+1; i++)
         pos_cnts[i] += pos_cnts[i-1];
 
     mf_float all_u_mpr = 0;
@@ -1614,44 +1653,42 @@ pair<mf_double, mf_double> calc_mpr_auc(mf_problem *prob, mf_model &model, bool 
 #pragma omp parallel for schedule(static) reduction(+: all_u_mpr, all_u_auc)
 #endif
 
-    for(int i = 0; i < m; i++)
+    for(mf_int i = 0; i < m; i++)
     {
-        if(pos_cnts[i+1]-pos_cnts[i] < 1) // skip this user has no rating in the validation set
+        if(pos_cnts[i+1]-pos_cnts[i] < 1)
             continue;
 
-        vector<pair<mf_node, mf_float>> row(n); // the u-th user's nodes and their prediction values
+        vector<pair<mf_node, mf_float>> row(n);
 
-        // assume all ratings are all zero and calculate their prediction values
-        for(int j = 0; j < n; j++)
+        for(mf_int j = 0; j < n; j++)
         {
             mf_node N;
             N.*row_ptr = i;
             N.*col_ptr = j;
             N.r = 0;
-            row[j] = make_pair(N, mf_predict(&model, N.u, N.v));
+            row[j] = make_pair(N, mf_predict(model, N.u, N.v));
         }
 
-        mf_int neg = 0; // # of encountered negative instances
-        mf_int pos = 0; // # of encountered positive instances
-        mf_double u_mpr = 0; // expectation of the rank of a positive item with regarding to all negative items
+        mf_int neg = 0;
+        mf_int pos = 0;
+        mf_double u_mpr = 0;
         mf_double u_auc = 0;
 
-        if(pos_cnts[i+1]-pos_cnts[i] < 100) //cnt_threshold for speed-up
+        if(pos_cnts[i+1]-pos_cnts[i] < 100)
         {
-            // copy ratings in the validation set to the row
-            mf_int index[pos_cnts[i+1]-pos_cnts[i]]; //index of positive nodes
-            for(int j = pos_cnts[i]; j < pos_cnts[i+1]; j++)
+            mf_int index[pos_cnts[i+1]-pos_cnts[i]];
+            for(mf_int j = pos_cnts[i]; j < pos_cnts[i+1]; j++)
             {
                 if(prob->R[j].r > 0)
                 {
-                    int col = prob->R[j].*col_ptr;
+                    mf_int col = prob->R[j].*col_ptr;
                     row[col].first.r = prob->R[j].r;
                     index[pos] = col;
                     pos++;
                 }
             }
             neg = n - pos;
-            int count = 0;
+            mf_int count = 0;
             for(int k = 0; k < pos; k++)
             {
                 swap(row[count], row[index[k]]);
@@ -1683,33 +1720,30 @@ pair<mf_double, mf_double> calc_mpr_auc(mf_problem *prob, mf_model &model, bool 
         }
         else
         {
-            // copy ratings in the validation set to the row
-            for(int j = pos_cnts[i]; j < pos_cnts[i+1]; j++)
+            for(mf_int j = pos_cnts[i]; j < pos_cnts[i+1]; j++)
                 row[prob->R[j].*col_ptr].first.r = prob->R[j].r;
 
-            // sort the u-th user's nodes by their prediction values
             sort(row.begin(), row.end(), sort_by_pred);
 
-            // scan the sorted nodes
-            for(auto current = row.begin(); current != row.end(); current++)// go through the items from low score to high score
+            for(auto current = row.begin(); current != row.end(); current++)
             {
-                if(current->first.r > 0) // a positive instance
+                if(current->first.r > 0)
                 {
                     u_auc += neg;
                     pos++;
                 }
-                else // a negative instace
+                else
                 {
-                    u_mpr += pos; // for all positive items before the negative item, ranks are reduced by 1
+                    u_mpr += pos;
                     neg++;
                 }
             }
 
             if(neg > 0)
             {
-                u_mpr /= neg; // sum of the percentile rank of the u-th user's positive instances
+                u_mpr /= neg;
                 u_auc /= neg*pos;
-                all_u_mpr += u_mpr; // sum of u_mpr for all users
+                all_u_mpr += u_mpr;
                 all_u_auc += u_auc;
             }
         }
@@ -1719,41 +1753,14 @@ pair<mf_double, mf_double> calc_mpr_auc(mf_problem *prob, mf_model &model, bool 
     return make_pair(all_u_mpr, all_u_auc);
 }
 
-mf_double calc_rmse(mf_problem *prob, mf_model &model)
+mf_double calc_mpr(mf_problem *prob, mf_model *model, bool transpose)
 {
-    if(prob->nnz == 0)
-        return 0;
-    mf_double loss = 0;
-#if defined USEOMP
-#pragma omp parallel for schedule(static) reduction(+:loss)
-#endif
-    for(mf_long i = 0; i < prob->nnz; i++)
-    {
-        mf_node &N = prob->R[i];
-        mf_float e = N.r - mf_predict(&model, N.u, N.v);
-        loss += e*e;
-    }
-    return sqrt(loss/prob->nnz);
+    return calc_mpr_auc(prob, model, transpose).first;
 }
 
-mf_double calc_logloss(mf_problem *prob, mf_model &model)
+mf_double calc_auc(mf_problem *prob, mf_model *model, bool transpose)
 {
-    if(prob->nnz == 0)
-        return 0;
-    mf_double logloss = 0;
-#if defined USEOMP
-#pragma omp parallel for schedule(static) reduction(+:logloss)
-#endif
-    for(mf_long i = 0; i < prob->nnz; i++)
-    {
-        mf_node &N = prob->R[i];
-        mf_float z = mf_predict(&model, N.u, N.v);
-        if(N.r > 0)
-            logloss += log(1.0+exp(-z));
-        else
-            logloss += log(1.0+exp(z));
-    }
-    return logloss/prob->nnz;
+    return calc_mpr_auc(prob, model, transpose).second;
 }
 
 mf_parameter mf_get_default_param()
@@ -1772,7 +1779,7 @@ mf_parameter mf_get_default_param()
     param.do_nmf = false;
     param.quiet = false;
     param.copy_data = true;
-    param.solver = 0;
+    param.solver = SQ_MF;
 
     return param;
 }
