@@ -1,6 +1,8 @@
 #ifndef _LIBMF_H
 #define _LIBMF_H
 
+#include <utility>
+
 #ifdef __cplusplus
 extern "C" 
 {
@@ -60,6 +62,8 @@ struct mf_model
 
 mf_int mf_save_model(struct mf_model const *model, char const *path);
 
+mf_problem read_problem(std::string path);
+
 struct mf_model* mf_load_model(char const *path);
 
 void mf_destroy_model(struct mf_model **model);
@@ -80,8 +84,9 @@ mf_float mf_cross_validation(
 
 mf_float mf_predict(struct mf_model const *model, mf_int p_idx, mf_int q_idx);
 
-mf_problem read_problem(std::string path);
-
+std::pair<mf_double, mf_double> calc_mpr_auc(mf_problem *prob, mf_model &model, bool transpose);
+mf_double calc_rmse(mf_problem *prob, mf_model &model);
+mf_double calc_logloss(mf_problem *prob, mf_model &model);
 #ifdef __cplusplus
 } // namespace mf
 
