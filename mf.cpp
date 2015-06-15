@@ -788,7 +788,7 @@ mf_model* Utility::init_model(shared_ptr<mf_problem> prob, mf_int k_real, mf_int
     model->Q = nullptr;
 
     mf_float scale = sqrt(1.0/k_real);
-	default_random_engine generator;
+    default_random_engine generator;
     uniform_real_distribution<mf_float> distribution(0.0, 1.0);
 
     try

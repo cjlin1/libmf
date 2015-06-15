@@ -57,7 +57,7 @@ Option parse_option(int argc, char **argv)
             if((i+1) >= argc)
                 throw invalid_argument("need to specify lambda after -l");
             i++;
-            option.param.lambda = stof(args[i]);
+            option.param.lambda = atof(argv[i]);
             if(option.param.lambda < 0)
                 throw invalid_argument("regularization parameter should not be smaller than zero");
         }
@@ -66,7 +66,7 @@ Option parse_option(int argc, char **argv)
             if((i+1) >= argc)
                 throw invalid_argument("need to specify number of factors after -k");
             i++;
-            option.param.k = stoi(args[i]);
+            option.param.k = atoi(argv[i]);
             if(option.param.k <= 0)
                 throw invalid_argument("number of factors should be greater than zero");
         }
@@ -75,7 +75,7 @@ Option parse_option(int argc, char **argv)
             if((i+1) >= argc)
                 throw invalid_argument("need to specify number of iterations after -t");
             i++;
-            option.param.nr_iters = stoi(args[i]);
+            option.param.nr_iters = atoi(argv[i]);
             if(option.param.nr_iters <= 0)
                 throw invalid_argument("number of iterations should be greater than zero");
         }
@@ -84,7 +84,7 @@ Option parse_option(int argc, char **argv)
             if((i+1) >= argc)
                 throw invalid_argument("need to specify eta after -r");
             i++;
-            option.param.eta = stof(args[i]);
+            option.param.eta = atof(argv[i]);
             if(option.param.eta <= 0)
                 throw invalid_argument("learning rate should be greater than zero");
         }
@@ -93,7 +93,7 @@ Option parse_option(int argc, char **argv)
             if((i+1) >= argc)
                 throw invalid_argument("need to specify number of threads after -s");
             i++;
-            option.param.nr_threads = stoi(args[i]);
+            option.param.nr_threads = atoi(argv[i]);
             if(option.param.nr_threads <= 0)
                 throw invalid_argument("number of threads should be greater than zero");
         }
@@ -109,7 +109,7 @@ Option parse_option(int argc, char **argv)
             if(i == argc-1)
                 throw invalid_argument("need to specify number of folds after -v");
             i++;
-            option.nr_folds = stoi(args[i]);
+            option.nr_folds = atoi(argv[i]);
             if(option.nr_folds <= 1)
                 throw invalid_argument("number of folds should be larger than 1");
             option.do_cv = true;
