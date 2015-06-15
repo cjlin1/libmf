@@ -335,10 +335,10 @@ Building Windows and Mac and Binaries
 
        CXXFLAGS = -O3 -pthread -std=c++0x
 
-    3. If AVX is enabled, we add `-Wa, -q' to the `CXXFLAGS,' so the previous
+    3. If AVX is enabled, we add `-Wa,-q' to the `CXXFLAGS,' so the previous
        `CXXFLAGS' becomes
 
-       CXXFLAGS = -O3 -pthread -std=c++0x -Wa, -q
+       CXXFLAGS = -O3 -pthread -std=c++0x -Wa,-q
   
 
 
