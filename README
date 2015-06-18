@@ -12,7 +12,7 @@ Table of Contents
 - Examples
 - Library Usage
 - SSE, AVX, and OpenMP
-- Building Windows Binaries
+- Building Windows and Mac Binaries
 - References
 
 
@@ -20,15 +20,14 @@ Table of Contents
 Installation
 ============
 
-- Unix
+- Unix & Cygwin
 
   Type `make' to build `mf-train' and `mf-precict.'
 
-- Windows
+- Windows & Mac
     
-  Use pre-built binaries in the directory `windows,' or see `Building
-  Windows Binaries' to compile.
-
+  See `Building Windows and Mac Binaries' to compile. For Windows, pre-built
+  binaries are available in the directory `windows.'
 
 
 Data Format
@@ -295,29 +294,52 @@ Note: Please always run `make clean all' if these flags are changed.
 
 
 
-Building Windows Binaries
-=========================
+Building Windows and Mac and Binaries
+=====================================
 
-Windows binaries are in the directory `windows.' To build them via
-command-line tools of Visual C++, use the following steps:
+-   Windows
 
-1. Open a DOS command box (or Developer Command Prompt for Visual Studio) and
-go to libmf directory. If environment variables of VC++ have not been
-set, type
+    Windows binaries are in the directory `windows.' To build them via
+    command-line tools of Microsoft Visual Studio, use the following steps:
 
-"C:\Program Files (x86)\Microsoft Visual Studio 12.0\VC\bin\amd64\vcvars64.bat"
+    1. Open a DOS command box (or Developer Command Prompt for Visual Studio)
+    and go to libmf directory. If environment variables of VC++ have not been
+    set, type
 
-You may have to modify the above command according which version of
-VC++ or where it is installed.
+    "C:\Program Files (x86)\Microsoft Visual Studio 12.0\VC\bin\amd64\vcvars64.bat"
 
-2. Type
+    You may have to modify the above command according which version of VC++
+    or where it is installed.
 
-nmake -f Makefile.win clean all
+    2. Type
 
-3. (optional) To build shared library mf_c.dll, type
+    nmake -f Makefile.win clean all
 
-nmake -f Makefile.win lib
+    3. (optional) To build shared library mf_c.dll, type
 
+    nmake -f Makefile.win lib
+
+-   Mac
+    
+    To complie LIBMF on Mac, a GCC complier is required, and users need to
+    slightly modify the Makefile. The following instructions are tested with
+    GCC 4.9.
+
+    1. Set the complier path to your GCC complier. For example, the first
+       line in the Makefile can be
+   
+       CXX = g++-4.9
+
+    2. Remove `-march=native' from `CXXFLAGS.' The second line in the Makefile
+       Should be
+
+       CXXFLAGS = -O3 -pthread -std=c++0x
+
+    3. If AVX is enabled, we add `-Wa,-q' to the `CXXFLAGS,' so the previous
+       `CXXFLAGS' becomes
+
+       CXXFLAGS = -O3 -pthread -std=c++0x -Wa,-q
+  
 
 
 References
