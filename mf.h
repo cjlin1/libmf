@@ -1,6 +1,8 @@
 #ifndef _LIBMF_H
 #define _LIBMF_H
 
+#include <utility>
+
 #ifdef __cplusplus
 extern "C" 
 {
@@ -14,6 +16,9 @@ typedef float mf_float;
 typedef double mf_double;
 typedef int mf_int;
 typedef long long mf_long;
+
+enum {SQ_MF=0, LR_MF=5, SQ_HINGE_MF=6, ROW_BPR=10, COL_BPR=11, ROW_OCCF=12, COL_OCCF=13};
+enum {RMSE=0, LOGLOSS=1, MPR=10, AUC=11};
 
 struct mf_node
 {
@@ -60,6 +65,8 @@ struct mf_model
 
 mf_int mf_save_model(struct mf_model const *model, char const *path);
 
+mf_problem read_problem(std::string path);
+
 struct mf_model* mf_load_model(char const *path);
 
 void mf_destroy_model(struct mf_model **model);
@@ -78,7 +85,15 @@ mf_float mf_cross_validation(
     mf_int nr_folds, 
     struct mf_parameter param);
 
-mf_float mf_predict(struct mf_model const *model, mf_int p_idx, mf_int q_idx);
+mf_float mf_predict(struct mf_model const *model, mf_int u, mf_int v);
+
+mf_double calc_rmse(mf_problem *prob, mf_model *model);
+
+mf_double calc_logloss(mf_problem *prob, mf_model *model);
+
+mf_double calc_mpr(mf_problem *prob, mf_model *model, bool transpose);
+
+mf_double calc_auc(mf_problem *prob, mf_model *model, bool transpose);
 
 #ifdef __cplusplus
 } // namespace mf
