@@ -63,9 +63,9 @@ struct mf_model
     mf_float *Q;
 };
 
-mf_int mf_save_model(struct mf_model const *model, char const *path);
-
 mf_problem read_problem(std::string path);
+
+mf_int mf_save_model(struct mf_model const *model, char const *path);
 
 struct mf_model* mf_load_model(char const *path);
 

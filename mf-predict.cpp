@@ -15,7 +15,7 @@ using namespace mf;
 
 struct Option
 {
-    Option() : eval(0) {}
+    Option() : eval(RMSE) {}
     string test_path, model_path, output_path;
     mf_int eval;
 };

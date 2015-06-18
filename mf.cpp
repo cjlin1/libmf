@@ -1406,14 +1406,14 @@ mf_float mf_cross_validation(
 
         fpsg(prob, nullptr, param, cv_blocks1, &loss1, &count1);
 
-        mf_float rmse1 = util.get_criterion(loss1, count1);
+        mf_float err1 = util.get_criterion(loss1, count1);
 
         if(!quiet)
         {
             cout.width(4);
             cout << fold;
             cout.width(10);
-            cout << fixed << setprecision(4) << rmse1;
+            cout << fixed << setprecision(4) << err1;
             cout << endl;
         }
 
@@ -1421,7 +1421,7 @@ mf_float mf_cross_validation(
         count += count1;
     }
 
-    mf_float rmse = util.get_criterion(loss, count);
+    mf_float err = util.get_criterion(loss, count);
 
     if(!quiet)
     {
@@ -1432,11 +1432,51 @@ mf_float mf_cross_validation(
         cout.width(4);
         cout << "avg";
         cout.width(10);
-        cout << fixed << setprecision(4) << rmse;
+        cout << fixed << setprecision(4) << err;
         cout << endl;
     }
     
-    return rmse;
+    return err;
+}
+
+mf_problem read_problem(string path)
+{
+    mf_problem prob;
+    prob.m = 0;
+    prob.n = 0;
+    prob.nnz = 0;
+    prob.R = nullptr;
+
+    if(path.empty())
+    {
+        return prob;
+    }
+
+    ifstream f(path);
+    if(!f.is_open())
+        throw runtime_error("cannot open " + path);
+    string line;
+    while(getline(f, line))
+        prob.nnz++;
+
+    mf_node *R = new mf_node[prob.nnz];
+
+    f.close();
+    f.open(path);
+
+    mf_long idx = 0;
+    for(mf_node N; f >> N.u >> N.v >> N.r;)
+    {
+        if(N.u+1 > prob.m)
+            prob.m = N.u+1;
+        if(N.v+1 > prob.n)
+            prob.n = N.v+1;
+        R[idx] = N;
+        idx++;
+    }
+    prob.R = R;
+
+    return prob;
 }
 
 mf_int mf_save_model(mf_model const *model, char const *path)
@@ -1507,46 +1547,6 @@ mf_model* mf_load_model(char const *path)
     read(model->Q, model->n);
 
     return model;
-}
-
-mf_problem read_problem(string path)
-{
-    mf_problem prob;
-    prob.m = 0;
-    prob.n = 0;
-    prob.nnz = 0;
-    prob.R = nullptr;
-
-    if(path.empty())
-    {
-        return prob;
-    }
-
-    ifstream f(path);
-    if(!f.is_open())
-        throw runtime_error("cannot open " + path);
-    string line;
-    while(getline(f, line))
-        prob.nnz++;
-
-    mf_node *R = new mf_node[prob.nnz];
-
-    f.close();
-    f.open(path);
-
-    mf_long idx = 0;
-    for(mf_node N; f >> N.u >> N.v >> N.r;)
-    {
-        if(N.u+1 > prob.m)
-            prob.m = N.u+1;
-        if(N.v+1 > prob.n)
-            prob.n = N.v+1;
-        R[idx] = N;
-        idx++;
-    }
-    prob.R = R;
-
-    return prob;
 }
 
 void mf_destroy_model(mf_model **model)
