@@ -71,8 +71,9 @@ class Scheduler
 public:
     Scheduler(mf_int nr_bins, mf_int nr_threads, vector<mf_int> cv_blocks);
     mf_int get_job();
-    void put_job(mf_int block, mf_double loss);
+    void put_job(mf_int block, mf_double loss, mf_double error);
     mf_double get_loss();
+    mf_double get_error();
     void wait_for_jobs_done();
     void resume();
     void terminate();
@@ -89,6 +90,7 @@ private:
     vector<mf_int> busy_p_blocks;
     vector<mf_int> busy_q_blocks;
     vector<mf_double> block_losses;
+    vector<mf_double> block_errors;
     unordered_set<mf_int> cv_blocks;
     mutex mtx;
     condition_variable cond_var;
@@ -111,6 +113,7 @@ Scheduler::Scheduler(mf_int nr_bins, mf_int nr_threads, vector<mf_int> cv_blocks
       busy_q_blocks(nr_bins, 0), 
       cv_blocks(cv_blocks.begin(), cv_blocks.end()),
       block_losses(nr_bins*nr_bins, 0),
+      block_errors(nr_bins*nr_bins, 0),
       distribution(0.0, 1.0) 
 {
     for(mf_int i = 0; i < nr_bins*nr_bins; i++)
@@ -143,13 +146,14 @@ mf_int Scheduler::get_job()
     }
 }
 
-void Scheduler::put_job(mf_int block_idx, mf_double loss)
+void Scheduler::put_job(mf_int block_idx, mf_double loss, mf_double error)
 {
     {
         lock_guard<mutex> lock(mtx);
         busy_p_blocks[block_idx/nr_bins] = 0;
         busy_q_blocks[block_idx%nr_bins] = 0;
         block_losses[block_idx] = loss;
+        block_errors[block_idx] = error;
         nr_done_jobs++;
         mf_float priority = (mf_float)counts[block_idx]+distribution(generator);
         pq.emplace(priority, block_idx);
@@ -174,6 +178,12 @@ mf_double Scheduler::get_loss()
 {
     lock_guard<mutex> lock(mtx);
     return accumulate(block_losses.begin(), block_losses.end(), 0.0);
+}
+
+mf_double Scheduler::get_error()
+{
+    lock_guard<mutex> lock(mtx);
+    return accumulate(block_errors.begin(), block_errors.end(), 0.0);
 }
 
 void Scheduler::wait_for_jobs_done()
@@ -255,7 +265,7 @@ inline void sg_update(
         if(tmp > 0)
         {
             __m128 XMMflip = _mm_and_ps(_mm_cmple_ps(XMMp, _mm_set1_ps(0.0f)),
-                               _mm_set1_ps(-0.0f));
+                             _mm_set1_ps(-0.0f));
             XMMp = _mm_xor_ps(XMMflip, _mm_max_ps(_mm_sub_ps(_mm_xor_ps(XMMp, XMMflip),
                    _mm_mul_ps(XMMeta_p, XMMlambda_p1)), _mm_set1_ps(0.0f)));
         }
@@ -264,7 +274,7 @@ inline void sg_update(
         if(tmp > 0)
         {
             __m128 XMMflip = _mm_and_ps(_mm_cmple_ps(XMMq, _mm_set1_ps(0.0f)),
-                               _mm_set1_ps(-0.0f));
+                             _mm_set1_ps(-0.0f));
             XMMq = _mm_xor_ps(XMMflip, _mm_max_ps(_mm_sub_ps(_mm_xor_ps(XMMq, XMMflip),
                    _mm_mul_ps(XMMeta_q, XMMlambda_q1)), _mm_set1_ps(0.0f)));
         }
@@ -464,6 +474,7 @@ void sg(vector<mf_node*> &ptrs, mf_model &model, Scheduler &sched,
     {
         mf_int block = sched.get_job();
         __m128d XMMloss = _mm_setzero_pd();
+        __m128d XMMerror = _mm_setzero_pd();
         for(mf_node *N = ptrs[block]; N != ptrs[block+1]; N++)
         {
             mf_float *p = P+(mf_long)N->u*model.k;
@@ -485,6 +496,7 @@ void sg(vector<mf_node*> &ptrs, mf_model &model, Scheduler &sched,
                     XMMz = _mm_sub_ps(_mm_set1_ps(N->r), XMMz);
                     XMMloss = _mm_add_pd(XMMloss, _mm_cvtps_pd(
                               _mm_mul_ps(XMMz, XMMz)));
+                    XMMerror = XMMloss;
                     break;
                 case LR_MF:
                     _mm_store_ss(&z, XMMz);
@@ -500,6 +512,27 @@ void sg(vector<mf_node*> &ptrs, mf_model &model, Scheduler &sched,
                         XMMloss = _mm_add_pd(XMMloss, _mm_set1_pd(log(1+z)));
                         XMMz = _mm_set1_ps(-z/(1+z));
                     }
+                    XMMerror = XMMloss;
+                    break;
+                case SQ_HINGE_MF:
+                    if(N->r > 0)
+                    {
+                        __m128 mask = _mm_cmpgt_ps(XMMz, _mm_set1_ps(0.0f));
+                        XMMerror = _mm_add_pd(XMMerror, _mm_cvtps_pd(
+                                   _mm_and_ps(_mm_set1_ps(1.0f), mask)));
+                        XMMz = _mm_max_ps(_mm_set1_ps(0.0f), _mm_sub_ps(
+                               _mm_set1_ps(1.0f), XMMz));
+                    }
+                    else
+                    {
+                        __m128 mask = _mm_cmplt_ps(XMMz, _mm_set1_ps(0.0f));
+                        XMMerror = _mm_add_pd(XMMerror, _mm_cvtps_pd(
+                                   _mm_and_ps(_mm_set1_ps(1.0f), mask)));
+                        XMMz = _mm_min_ps(_mm_set1_ps(0.0f), _mm_sub_ps(
+                               _mm_set1_ps(-1.0f), XMMz));
+                    }
+                    XMMloss = _mm_add_pd(XMMloss, _mm_cvtps_pd(
+                              _mm_mul_ps(XMMz, XMMz)));
                     break;
                 default:
                     throw invalid_argument("unknown loss function");
@@ -518,8 +551,10 @@ void sg(vector<mf_node*> &ptrs, mf_model &model, Scheduler &sched,
                       XMMlambda_p2, XMMlambda_q2, XMMz, XMMrk_fast, param.do_nmf);
         }
         mf_double loss;
+        mf_double error;
         _mm_store_sd(&loss, XMMloss);
-        sched.put_job(block, loss);
+        _mm_store_sd(&error, XMMerror);
+        sched.put_job(block, loss, error);
         if(sched.is_terminated())
             break;
     }
@@ -535,6 +570,7 @@ void sg(vector<mf_node*> &ptrs, mf_model &model, Scheduler &sched,
     {
         mf_int block = sched.get_job();
         __m128d XMMloss = _mm_setzero_pd();
+        __m128d XMMerror = _mm_setzero_pd();
         for(mf_node *N = ptrs[block]; N != ptrs[block+1]; N++)
         {
             mf_float *p = P+(mf_long)N->u*model.k;
@@ -558,6 +594,7 @@ void sg(vector<mf_node*> &ptrs, mf_model &model, Scheduler &sched,
                     XMMloss = _mm_add_pd(XMMloss,
                               _mm_cvtps_pd(_mm256_castps256_ps128(
                               _mm256_mul_ps(XMMz, XMMz))));
+                    XMMerror = XMMloss;
                     break;
                 case LR_MF:
                     _mm_store1_ps(&z, _mm256_castps256_ps128(XMMz));
@@ -573,6 +610,30 @@ void sg(vector<mf_node*> &ptrs, mf_model &model, Scheduler &sched,
                         XMMloss = _mm_add_pd(XMMloss, _mm_set1_pd(log(1.0+z)));
                         XMMz = _mm256_set1_ps(-z/(1+z));
                     }
+                    XMMerror = XMMloss;
+                    break;
+                case SQ_HINGE_MF:
+                    if(N->r > 0)
+                    {
+                        __m128 mask = _mm_cmpgt_ps(_mm256_castps256_ps128(XMMz),
+                                      _mm_set1_ps(0.0f));
+                        XMMerror = _mm_add_pd(XMMloss, _mm_cvtps_pd(
+                                  _mm_and_ps(_mm_set1_ps(1.0f), mask)));
+                        XMMz = _mm256_max_ps(_mm256_set1_ps(0.0f),
+                               _mm256_sub_ps(_mm256_set1_ps(1.0f), XMMz));
+                    }
+                    else
+                    {
+                        __m128 mask = _mm_cmplt_ps(_mm256_castps256_ps128(XMMz),
+                                      _mm_set1_ps(0.0f));
+                        XMMerror = _mm_add_pd(XMMloss, _mm_cvtps_pd(
+                                  _mm_and_ps(_mm_set1_ps(1.0f), mask)));
+                        XMMz = _mm256_min_ps(_mm256_set1_ps(0.0f),
+                               _mm256_sub_ps(_mm256_set1_ps(-1.0f), XMMz));
+                    }
+                    XMMloss = _mm_add_pd(XMMloss, _mm_cvtps_pd(
+                              _mm_mul_ps(_mm256_castps256_ps128(XMMz),
+                              _mm256_castps256_ps128(XMMz))));
                     break;
                 default:
                     throw invalid_argument("unknown loss function");
@@ -591,8 +652,10 @@ void sg(vector<mf_node*> &ptrs, mf_model &model, Scheduler &sched,
                       XMMlambda_p2, XMMlambda_q2, XMMz, XMMrk_fast, param.do_nmf);
         }
         mf_double loss;
+        mf_double error;
         _mm_store_sd(&loss, XMMloss);
-        sched.put_job(block, loss);
+        _mm_store_sd(&error, XMMerror);
+        sched.put_job(block, loss, error);
         if(sched.is_terminated())
             break;
     }
@@ -603,6 +666,7 @@ void sg(vector<mf_node*> &ptrs, mf_model &model, Scheduler &sched,
     {
         mf_int block = sched.get_job();
         mf_double loss = 0;
+        mf_double error = 0;
         for(mf_node *N = ptrs[block]; N != ptrs[block+1]; N++)
         {
             mf_float *p = P+(mf_long)N->u*model.k;
@@ -619,20 +683,36 @@ void sg(vector<mf_node*> &ptrs, mf_model &model, Scheduler &sched,
                 case SQ_MF:
                     z = N->r-z;
                     loss += z*z;
+                    error = loss;
                     break;
                 case LR_MF:
                     if(N->r > 0)
                     {
                         z = exp(-z);
                         loss += log(1+z);
+                        error = loss;
                         z = z/(1+z);
                     }
                     else
                     {
                         z = exp(z);
                         loss += log(1+z);
+                        error = loss;
                         z = -z/(1+z);
                     }
+                    break;
+                case SQ_HINGE_MF:
+                    if(N->r > 0)
+                    {
+                        error += z > 0? 1: 0;
+                        z = max(0.0f, 1-z);
+                    }
+                    else
+                    {
+                        error += z < 0? 1: 0;
+                        z = min(0.0f, -1-z); // -max(0, 1+z) = min(0, -1-z)
+                    }
+                    loss += z*z;
                     break;
                  default:
                     throw invalid_argument("unknown loss function");
@@ -656,7 +736,7 @@ void sg(vector<mf_node*> &ptrs, mf_model &model, Scheduler &sched,
                       z, rk_fast, param.do_nmf);
 
         }
-        sched.put_job(block, loss);
+        sched.put_job(block, loss, error);
         if(sched.is_terminated())
             break;
     }
@@ -675,10 +755,8 @@ public:
             vector<mf_int> &omega_p, vector<mf_int> &omega_q);
     mf_double calc_reg2(mf_model &model, mf_float lambda_p, mf_float lambda_q,
             vector<mf_int> &omega_p, vector<mf_int> &omega_q);
-    mf_double calc_loss(mf_node *R, mf_long size, mf_model const &model);
-    string get_criterion_legend();
-    mf_double get_criterion(mf_double const loss, mf_long const size);
-    mf_double get_criterion(mf_problem const &prob, mf_model const &model);
+    string get_error_legend();
+    mf_double calc_error(mf_node const *R, mf_long const size, mf_model const &model);
     void scale_model(mf_model &model, mf_float scale);
 
     static mf_problem* copy_problem(mf_problem const *prob, bool copy_data);
@@ -826,36 +904,42 @@ mf_double Utility::calc_reg2(mf_model &model, mf_float lambda_p, mf_float lambda
            lambda_q*calc_reg2_core(model.Q, model.n, omega_q);
 }
 
-mf_double Utility::calc_loss(mf_node *R, mf_long size, mf_model const &model)
+mf_double Utility::calc_error(mf_node const *R, mf_long const size, mf_model const &model)
 {
-    mf_double loss = 0;
+    mf_double error = 0;
 #if defined USEOMP
-#pragma omp parallel for num_threads(nr_threads) schedule(static) reduction(+:loss)
+#pragma omp parallel for num_threads(nr_threads) schedule(static) reduction(+:error)
 #endif
     for(mf_long i = 0; i < size; i++)
     {
-        mf_node &N = R[i];
+        mf_node const &N = R[i];
         mf_float z = mf_predict(&model, N.u, N.v);
         switch(solver)
         {
             case SQ_MF:
-                loss += pow(N.r-z, 2);
+                error += pow(N.r-z, 2);
                 break;
             case LR_MF:
                 if(N.r > 0)
-                    loss += log(1.0+exp(-z));
+                    error += log(1.0+exp(-z));
                 else
-                    loss += log(1.0+exp(z));
+                    error += log(1.0+exp(z));
                 break;
-             default:
-                throw invalid_argument("unknown loss function");
+            case SQ_HINGE_MF:
+                if(N.r > 0)
+                    error += z > 0? 1: 0;
+                else
+                    error += z < 0? 1: 0;
+                break;
+            default:
+                throw invalid_argument("unknown error function");
                 break;
         }
     }
-    return loss;
+    return error;
 }
 
-string Utility::get_criterion_legend()
+string Utility::get_error_legend()
 {
     switch(solver)
     {
@@ -865,39 +949,13 @@ string Utility::get_criterion_legend()
         case LR_MF:
             return string("logloss");
             break;
+        case SQ_HINGE_MF:
+            return string("accuracy");
+            break;
         default:
             return string();
             break;
      }
-}
-
-mf_double Utility::get_criterion(mf_double const loss, mf_long const size)
-{
-    if(size == 0)
-        return 0;
-
-    switch(solver)
-    {
-        case SQ_MF:
-            return sqrt(loss/size);
-            break;
-        case LR_MF:
-            return loss/size;
-            break;
-        default:
-            throw invalid_argument("unknown loss function");
-            break;
-    }
-}
-
-mf_double Utility::get_criterion(mf_problem const &prob, mf_model const &model)
-{
-    if(prob.nnz == 0)
-        return 0;
-
-    mf_double loss = calc_loss(prob.R, prob.nnz, model);
-
-    return get_criterion(loss, prob.nnz);
 }
 
 void Utility::shuffle_problem(
@@ -1168,7 +1226,7 @@ shared_ptr<mf_model> fpsg(
     mf_problem const *va_, 
     mf_parameter param, 
     vector<mf_int> cv_blocks=vector<mf_int>(),
-    mf_double *cv_loss=nullptr, 
+    mf_double *cv_error=nullptr, 
     mf_long *cv_count=nullptr)
 {
     param.nr_bins = max(param.nr_bins, 2*param.nr_threads);
@@ -1246,11 +1304,11 @@ shared_ptr<mf_model> fpsg(
         cout.width(4);
         cout << "iter";
         cout.width(13);
-        cout << "tr_"+util.get_criterion_legend();
+        cout << "tr_"+util.get_error_legend();
         if(va->nnz != 0)
         {
             cout.width(13);
-            cout << "va_"+util.get_criterion_legend();
+            cout << "va_"+util.get_error_legend();
         }
         cout.width(13);
         cout << "obj";
@@ -1269,18 +1327,22 @@ shared_ptr<mf_model> fpsg(
                             omega_p, omega_q)*std_dev*std_dev;
 
             mf_double tr_loss = sched.get_loss()*std_dev*std_dev;
-
-            mf_double tr_criterion = util.get_criterion(tr_loss, tr->nnz);
+            mf_double tr_error = sched.get_error()*std_dev*std_dev/tr->nnz;
+            if(param.solver == SQ_MF)
+                tr_error = sqrt(tr_error);
             
             cout.width(4);
             cout << iter;
             cout.width(13);
-            cout << fixed << setprecision(4) << tr_criterion;
+            cout << fixed << setprecision(4) << tr_error;
             if(va->nnz != 0)
             {
-                mf_double va_criterion = util.get_criterion(*va, *model)*std_dev;
+                mf_double va_error = util.calc_error(va->R, va->nnz, *model)*std_dev/va->nnz;
+                if(param.solver == SQ_MF)
+                    va_error = sqrt(va_error);
+
                 cout.width(13);
-                cout << fixed << setprecision(4) << va_criterion;
+                cout << fixed << setprecision(4) << va_error;
             }
             cout.width(13);
             cout << fixed << setprecision(4) << scientific << reg+tr_loss;
@@ -1301,18 +1363,16 @@ shared_ptr<mf_model> fpsg(
     _MM_SET_FLUSH_ZERO_MODE(flush_zero_mode);
 #endif
 
-    mf_double loss = util.calc_loss(tr->R, tr->nnz, *model)*std_dev*std_dev;
-
-    if(cv_loss != nullptr && cv_count != nullptr)
+    if(cv_error != nullptr && cv_count != nullptr)
     {
-        *cv_loss = 0;
+        *cv_error = 0;
         *cv_count = 0;
         for(auto block : cv_blocks)
         {
-            *cv_loss += util.calc_loss(ptrs[block], ptrs[block+1]-ptrs[block], *model);
+            *cv_error += util.calc_error(ptrs[block], ptrs[block+1]-ptrs[block], *model);
             *cv_count += ptrs[block+1]-ptrs[block];
         }
-        *cv_loss *= std_dev*std_dev;
+        *cv_error *= std_dev*std_dev;
     }
 
     vector<mf_int> inv_p_map = Utility::gen_inv_map(p_map);
@@ -1386,11 +1446,11 @@ mf_float mf_cross_validation(
         cout.width(4);
         cout << "fold";
         cout.width(10);
-        cout << util.get_criterion_legend();
+        cout << util.get_error_legend();
         cout << endl;
     }
 
-    mf_double loss = 0;
+    mf_double err = 0;
     mf_int idx = 0;
     mf_long count = 0;
     for(mf_int fold = 0; fold < nr_folds; fold++)
@@ -1401,12 +1461,14 @@ mf_float mf_cross_validation(
         vector<mf_int> cv_blocks1(cv_blocks.begin()+begin, 
                                   cv_blocks.begin()+end);
 
-        mf_double loss1 = 0;
+        mf_double err1 = 0;
         mf_long count1 = 0;
 
-        fpsg(prob, nullptr, param, cv_blocks1, &loss1, &count1);
+        fpsg(prob, nullptr, param, cv_blocks1, &err1, &count1);
 
-        mf_float err1 = util.get_criterion(loss1, count1);
+        err1 /= count1;
+        if(param.solver == SQ_MF)
+            err1 = sqrt(err1);
 
         if(!quiet)
         {
@@ -1417,11 +1479,8 @@ mf_float mf_cross_validation(
             cout << endl;
         }
 
-        loss += loss1;
-        count += count1;
+        err += err1;
     }
-
-    mf_float err = util.get_criterion(loss, count);
 
     if(!quiet)
     {
@@ -1432,7 +1491,7 @@ mf_float mf_cross_validation(
         cout.width(4);
         cout << "avg";
         cout.width(10);
-        cout << fixed << setprecision(4) << err;
+        cout << fixed << setprecision(4) << err/nr_folds;
         cout << endl;
     }
     
@@ -1612,11 +1671,31 @@ mf_double calc_logloss(mf_problem *prob, mf_model *model)
     return logloss/prob->nnz;
 }
 
+mf_double calc_accuracy(mf_problem *prob, mf_model *model)
+{
+    if(prob->nnz == 0)
+        return 0;
+    mf_double acc = 0;
+#if defined USEOMP
+#pragma omp parallel for schedule(static) reduction(+:acc)
+#endif
+    for(mf_long i = 0; i < prob->nnz; i++)
+    {
+        mf_node &N = prob->R[i];
+        mf_float z = mf_predict(model, N.u, N.v);
+        if(N.r > 0)
+            acc += z > 0? 1: 0;
+        else
+            acc += z < 0? 1: 0;
+    }
+    return acc/prob->nnz;
+}
+
 pair<mf_double, mf_double> calc_mpr_auc(mf_problem *prob, mf_model *model, bool transpose)
 {
     mf_int mf_node::*row_ptr;
     mf_int mf_node::*col_ptr;
-    mf_int m, n;
+    mf_int m = 0, n = 0;
     if(!transpose)
     {
         row_ptr = &mf_node::u;
@@ -1739,7 +1818,7 @@ pair<mf_double, mf_double> calc_mpr_auc(mf_problem *prob, mf_model *model, bool 
                 }
             }
 
-            if(neg > 0)
+            if(neg > 0 && pos > 0)
             {
                 u_mpr /= neg;
                 u_auc /= neg*pos;

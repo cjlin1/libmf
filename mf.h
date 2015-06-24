@@ -17,8 +17,8 @@ typedef double mf_double;
 typedef int mf_int;
 typedef long long mf_long;
 
-enum {SQ_MF=0, LR_MF=5, SQ_HINGE_MF=6, ROW_BPR=10, COL_BPR=11, ROW_OCCF=12, COL_OCCF=13};
-enum {RMSE=0, LOGLOSS=1, MPR=10, AUC=11};
+enum {SQ_MF=0, LR_MF=5, SQ_HINGE_MF=6, ROW_BPR=10, COL_BPR=11};
+enum {RMSE=0, LOGLOSS=1, ACC=2, MPR=10, AUC=11};
 
 struct mf_node
 {
@@ -90,6 +90,8 @@ mf_float mf_predict(struct mf_model const *model, mf_int u, mf_int v);
 mf_double calc_rmse(mf_problem *prob, mf_model *model);
 
 mf_double calc_logloss(mf_problem *prob, mf_model *model);
+
+mf_double calc_accuracy(mf_problem *prob, mf_model *model);
 
 mf_double calc_mpr(mf_problem *prob, mf_model *model, bool transpose);
 
