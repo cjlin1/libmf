@@ -40,28 +40,6 @@ namespace // unnamed namespace
 mf_int const kALIGNByte = 32;
 mf_int const kALIGN = kALIGNByte/sizeof(mf_float);
 
-vector<string> tokenize(string str)
-{
-    vector<string> tokens;
-
-    if(str.empty())
-        return tokens;
-
-    basic_string<char>::size_type begin = 0, end = 0;
-    while((end = str.find_first_of(" ", begin)) != string::npos)
-    {
-        string token = str.substr(begin, end-begin);
-        if(token.size() != 0)
-            tokens.push_back(token);
-        begin = end + 1;
-    }
-    string tail = str.substr(begin);
-    if(tail.size() != 0)
-        tokens.push_back(tail);
-
-    return tokens;
-}
-
 class Scheduler
 {
 public:
@@ -1158,7 +1136,6 @@ mf_float mf_cross_validation(
     }
 
     mf_double loss = 0;
-    mf_int idx = 0;
     mf_long count = 0;
     for(mf_int fold = 0; fold < nr_folds; fold++)
     {
