@@ -682,9 +682,9 @@ void Utility::shuffle_problem(
     for(mf_long i = 0; i < prob.nnz; i++)
     {
         mf_node &N = prob.R[i];
-        if(N.u < p_map.size())
+        if(N.u < (mf_long) p_map.size())
             N.u = p_map[N.u];
-        if(N.v < q_map.size())
+        if(N.v < (mf_long) q_map.size())
             N.v = q_map[N.v];
     }
 }
@@ -841,7 +841,7 @@ vector<mf_int> Utility::gen_random_map(mf_int size)
 vector<mf_int> Utility::gen_inv_map(vector<mf_int> &map)
 {
     vector<mf_int> inv_map(map.size());
-    for(mf_int i = 0; i < map.size(); i++)
+    for(vector<mf_int>::size_type i = 0; i < map.size(); i++)
       inv_map[map[i]] = i;
     return inv_map;
 }
