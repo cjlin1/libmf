@@ -105,8 +105,8 @@ Scheduler::Scheduler(mf_int nr_bins, mf_int nr_threads, vector<mf_int> cv_blocks
       counts(nr_bins*nr_bins, 0), 
       busy_p_blocks(nr_bins, 0), 
       busy_q_blocks(nr_bins, 0), 
-      cv_blocks(cv_blocks.begin(), cv_blocks.end()),
       block_losses(nr_bins*nr_bins, 0),
+      cv_blocks(cv_blocks.begin(), cv_blocks.end()),
       distribution(0.0, 1.0) 
 {
     for(mf_int i = 0; i < nr_bins*nr_bins; i++)
