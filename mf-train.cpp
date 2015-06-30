@@ -34,13 +34,15 @@ string train_help()
 "  P and Q share the same lambda if only one lambda is spceified.\n"
 "-x <solver>: specify the type of solver (default 0)\n"
 "  for numerical matrix factorization\n"
-"\t 0 -- square loss matrix factorization\n"
+"\t 0 -- L2-loss\n"
+"\t 1 -- L1-loss\n"
 "  for binary matrix factorization\n"
-"\t 5 -- Logistic matrix factorization\n"
-"\t 6 -- Square hinge matrix factorization\n"
+"\t 5 -- logistic loss\n"
+"\t 6 -- square hinge loss\n"
+"\t 7 -- hinge loss\n"
 "  for one-class matrix factorization\n"
-"\t10 -- Row-oriented bayesian personalized ranking\n"
-"\t11 -- Column-oriented bayesian personalized ranking\n"
+"\t10 -- row-oriented bayesian personalized ranking\n"
+"\t11 -- column-oriented bayesian personalized ranking\n"
 "-k <dimensions>: set number of dimensions (default 8)\n"
 "-t <iter>: set number of iterations (default 20)\n"
 "-r <eta>: set learning rate (default 0.1)\n"
@@ -163,8 +165,10 @@ Option parse_option(int argc, char **argv)
             i++;
             option.param.solver = atoi(argv[i]);
             if(option.param.solver != SQ_MF &&
+               option.param.solver != AE_MF &&
                option.param.solver != LR_MF &&
                option.param.solver != SQ_HINGE_MF &&
+               option.param.solver != HINGE_MF &&
                option.param.solver != ROW_BPR &&
                option.param.solver != COL_BPR) 
                 throw invalid_argument("unknown solver type");
