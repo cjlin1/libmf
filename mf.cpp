@@ -1323,8 +1323,7 @@ shared_ptr<mf_model> fpsg(
     mf_problem const *va_, 
     mf_parameter param, 
     vector<mf_int> cv_blocks=vector<mf_int>(),
-    mf_double *cv_error=nullptr, 
-    mf_long *cv_count=nullptr)
+    mf_double *cv_error=nullptr)
 {
     param.nr_bins = max(param.nr_bins, 2*param.nr_threads);
     Utility util(param.solver, param.nr_threads);
@@ -1363,14 +1362,27 @@ shared_ptr<mf_model> fpsg(
     shared_ptr<mf_model> model(Utility::init_model(tr, param.k, k_aligned), 
                                [] (mf_model *ptr) { mf_destroy_model(&ptr); });
 
-    mf_float std_dev = param.solver != 0? 1: max((mf_float)1e-4, util.calc_std_dev(*tr));
+    mf_float std_dev = 1;
 
-    util.scale_problem(*tr, 1.0/std_dev);
-    util.scale_problem(*va, 1.0/std_dev);
-    param.lambda_p2 /= std_dev;
-    param.lambda_q2 /= std_dev;
-    param.lambda_p1 /= pow(std_dev, 1.5);
-    param.lambda_q1 /= pow(std_dev, 1.5);
+    if(param.solver == SQ_MF || param.solver == AE_MF)
+    {
+        std_dev = max((mf_float)1e-4, util.calc_std_dev(*tr));
+        util.scale_problem(*tr, 1.0/std_dev);
+        util.scale_problem(*va, 1.0/std_dev);
+        switch(param.solver)
+        {
+            case SQ_MF:
+                param.lambda_p2 /= std_dev;
+                param.lambda_q2 /= std_dev;
+                param.lambda_p1 /= pow(std_dev, 1.5);
+                param.lambda_q1 /= pow(std_dev, 1.5);
+                break;
+            case AE_MF:
+                param.lambda_p1 /= sqrt(std_dev);
+                param.lambda_q1 /= sqrt(std_dev);
+                break;
+        }
+    }
 
     Scheduler sched(param.nr_bins, param.nr_threads, cv_blocks);
 
@@ -1418,15 +1430,30 @@ shared_ptr<mf_model> fpsg(
 
         if(!param.quiet)
         {
-            mf_double reg = util.calc_reg1(*model, param.lambda_p1, param.lambda_q1,
-                            omega_p, omega_q)*std_dev*std_dev+
-                            util.calc_reg2(*model, param.lambda_p2, param.lambda_q2,
-                            omega_p, omega_q)*std_dev*std_dev;
+            mf_double reg = 0;
+            mf_double reg1 = util.calc_reg1(*model, param.lambda_p1,
+                             param.lambda_q1, omega_p, omega_q);
+            mf_double reg2 = util.calc_reg2(*model, param.lambda_p2,
+                             param.lambda_q2, omega_p, omega_q);
+            mf_double tr_loss = sched.get_loss();
+            mf_double tr_error = sched.get_error()/tr->nnz;
 
-            mf_double tr_loss = sched.get_loss()*std_dev*std_dev;
-            mf_double tr_error = sched.get_error()*std_dev*std_dev/tr->nnz;
-            if(param.solver == SQ_MF)
-                tr_error = sqrt(tr_error);
+            switch(param.solver)
+            {
+                case SQ_MF:
+                    reg = reg1*sqrt(std_dev)+reg2*std_dev;
+                    tr_loss *= std_dev*std_dev;
+                    tr_error = sqrt(tr_error*std_dev*std_dev);
+                    break;
+                case AE_MF:
+                    reg = reg1*sqrt(std_dev)+reg2*std_dev;
+                    tr_loss *= std_dev;
+                    tr_error *= std_dev;
+                    break;
+                default:
+                    reg = reg1+reg2;
+                    break;
+            }
             
             cout.width(4);
             cout << iter;
@@ -1434,9 +1461,16 @@ shared_ptr<mf_model> fpsg(
             cout << fixed << setprecision(4) << tr_error;
             if(va->nnz != 0)
             {
-                mf_double va_error = util.calc_error(va->R, va->nnz, *model)*std_dev/va->nnz;
-                if(param.solver == SQ_MF)
-                    va_error = sqrt(va_error);
+                mf_double va_error = util.calc_error(va->R, va->nnz, *model)/va->nnz;
+                switch(param.solver)
+                {
+                    case SQ_MF:
+                        va_error = sqrt(va_error*std_dev*std_dev);
+                        break;
+                    case AE_MF:
+                        va_error *= std_dev;
+                        break;
+                }
 
                 cout.width(13);
                 cout << fixed << setprecision(4) << va_error;
@@ -1460,16 +1494,26 @@ shared_ptr<mf_model> fpsg(
     _MM_SET_FLUSH_ZERO_MODE(flush_zero_mode);
 #endif
 
-    if(cv_error != nullptr && cv_count != nullptr)
+    if(cv_error != nullptr)
     {
+        mf_long cv_count = 0;
         *cv_error = 0;
-        *cv_count = 0;
         for(auto block : cv_blocks)
         {
+            cv_count += ptrs[block+1]-ptrs[block];
             *cv_error += util.calc_error(ptrs[block], ptrs[block+1]-ptrs[block], *model);
-            *cv_count += ptrs[block+1]-ptrs[block];
         }
-        *cv_error *= std_dev*std_dev;
+        *cv_error /= cv_count;
+
+        switch(param.solver)
+        {
+            case SQ_MF:
+                *cv_error = sqrt(*cv_error*std_dev*std_dev);
+                break;
+            case AE_MF:
+                *cv_error *= std_dev;
+                break;
+        }
     }
 
     vector<mf_int> inv_p_map = Utility::gen_inv_map(p_map);
@@ -1559,13 +1603,8 @@ mf_float mf_cross_validation(
                                   cv_blocks.begin()+end);
 
         mf_double err1 = 0;
-        mf_long count1 = 0;
 
-        fpsg(prob, nullptr, param, cv_blocks1, &err1, &count1);
-
-        err1 /= count1;
-        if(param.solver == SQ_MF)
-            err1 = sqrt(err1);
+        fpsg(prob, nullptr, param, cv_blocks1, &err1);
 
         if(!quiet)
         {
@@ -1746,6 +1785,22 @@ mf_double calc_rmse(mf_problem *prob, mf_model *model)
         loss += e*e;
     }
     return sqrt(loss/prob->nnz);
+}
+
+mf_double calc_mae(mf_problem *prob, mf_model *model)
+{
+    if(prob->nnz == 0)
+        return 0;
+    mf_double loss = 0;
+#if defined USEOMP
+#pragma omp parallel for schedule(static) reduction(+:loss)
+#endif
+    for(mf_long i = 0; i < prob->nnz; i++)
+    {
+        mf_node &N = prob->R[i];
+        loss += abs(N.r - mf_predict(model, N.u, N.v));
+    }
+    return loss/prob->nnz;
 }
 
 mf_double calc_logloss(mf_problem *prob, mf_model *model)

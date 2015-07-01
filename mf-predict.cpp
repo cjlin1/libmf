@@ -29,8 +29,9 @@ string predict_help()
 "options:\n"
 "-e <eval>: specify the evaluation criterion (default 0)\n"
 "\t 0 -- Root mean square error\n"
-"\t 1 -- Logistic error\n"
-"\t 2 -- Accuracy\n"
+"\t 1 -- Mean absolute error\n"
+"\t 5 -- Logistic error\n"
+"\t 6 -- Accuracy\n"
 "\t10 -- Mean percentile rank\n"
 "\t11 -- Area under ROC curve\n");
 }
@@ -55,8 +56,9 @@ Option parse_option(int argc, char **argv)
                 throw invalid_argument("need to specify evaluation criterion after -e");
             i++;
             option.eval = atoi(argv[i]);
-            if(option.eval != RMSE && option.eval != LOGLOSS && option.eval != ACC &&
-                    option.eval != AUC  && option.eval != MPR)
+            if(option.eval != RMSE && option.eval != MAE &&
+               option.eval != LOGLOSS && option.eval != ACC &&
+               option.eval != AUC  && option.eval != MPR)
                 throw invalid_argument("unknown evaluation criterion");
         }
         else
@@ -112,6 +114,12 @@ void predict(string test_path, string model_path, string output_path, mf_int eva
         {
             auto rmse = calc_rmse(&prob, model);
             cout << fixed << setprecision(4) << "RMSE = " << rmse << endl;
+            break;
+        }
+        case MAE:
+        {
+            auto mae = calc_mae(&prob, model);
+            cout << fixed << setprecision(4) << "MAE = " << mae << endl;
             break;
         }
         case LOGLOSS:

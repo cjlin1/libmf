@@ -18,7 +18,7 @@ typedef int mf_int;
 typedef long long mf_long;
 
 enum {SQ_MF=0, AE_MF=1, LR_MF=5, SQ_HINGE_MF=6, HINGE_MF=7, ROW_BPR=10, COL_BPR=11};
-enum {RMSE=0, LOGLOSS=1, ACC=2, MPR=10, AUC=11};
+enum {RMSE=0, MAE=1, LOGLOSS=5, ACC=6, MPR=10, AUC=11};
 
 struct mf_node
 {
@@ -88,6 +88,8 @@ mf_float mf_cross_validation(
 mf_float mf_predict(struct mf_model const *model, mf_int u, mf_int v);
 
 mf_double calc_rmse(mf_problem *prob, mf_model *model);
+
+mf_double calc_mae(mf_problem *prob, mf_model *model);
 
 mf_double calc_logloss(mf_problem *prob, mf_model *model);
 
