@@ -164,13 +164,13 @@ Option parse_option(int argc, char **argv)
                 throw invalid_argument("need to specify the type of solver after -x");
             i++;
             option.param.solver = atoi(argv[i]);
-            if(option.param.solver != SQ_MF &&
-               option.param.solver != AE_MF &&
-               option.param.solver != LR_MF &&
-               option.param.solver != SQ_HINGE_MF &&
-               option.param.solver != HINGE_MF &&
-               option.param.solver != ROW_BPR &&
-               option.param.solver != COL_BPR) 
+            if(option.param.solver != P_L2_MFR &&
+               option.param.solver != P_L1_MFR &&
+               option.param.solver != P_LR_MFC &&
+               option.param.solver != P_L2_MFC &&
+               option.param.solver != P_L1_MFC &&
+               option.param.solver != P_ROW_BPR_MFOC &&
+               option.param.solver != P_COL_BPR_MFOC)
                 throw invalid_argument("unknown solver type");
         }
         else if(args[i].compare("--nmf") == 0)

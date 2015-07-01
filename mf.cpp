@@ -492,13 +492,13 @@ void sg(vector<mf_node*> &ptrs, mf_model &model, Scheduler &sched,
             mf_float z = 0;
             switch(param.solver)
             {
-                case SQ_MF:
+                case P_L2_MFR:
                     XMMz = _mm_sub_ps(_mm_set1_ps(N->r), XMMz);
                     XMMloss = _mm_add_pd(XMMloss, _mm_cvtps_pd(
                               _mm_mul_ps(XMMz, XMMz)));
                     XMMerror = XMMloss;
                     break;
-                case AE_MF:
+                case P_L1_MFR:
                     XMMz = _mm_sub_ps(_mm_set1_ps(N->r), XMMz);
                     XMMloss = _mm_add_pd(XMMloss, _mm_cvtps_pd(
                               _mm_andnot_ps(_mm_set1_ps(-0.0f), XMMz)));
@@ -508,7 +508,7 @@ void sg(vector<mf_node*> &ptrs, mf_model &model, Scheduler &sched,
                            _mm_and_ps(_mm_cmplt_ps(XMMz, _mm_set1_ps(0.0f)),
                            _mm_set1_ps(-1.0f)));
                     break;
-                case LR_MF:
+                case P_LR_MFC:
                     _mm_store_ss(&z, XMMz);
                     if(N->r > 0)
                     {
@@ -524,7 +524,7 @@ void sg(vector<mf_node*> &ptrs, mf_model &model, Scheduler &sched,
                     }
                     XMMerror = XMMloss;
                     break;
-                case SQ_HINGE_MF:
+                case P_L2_MFC:
                     if(N->r > 0)
                     {
                         __m128 mask = _mm_cmpgt_ps(XMMz, _mm_set1_ps(0.0f));
@@ -544,7 +544,7 @@ void sg(vector<mf_node*> &ptrs, mf_model &model, Scheduler &sched,
                     XMMloss = _mm_add_pd(XMMloss, _mm_cvtps_pd(
                               _mm_mul_ps(XMMz, XMMz)));
                     break;
-                case HINGE_MF:
+                case P_L1_MFC:
                     if(N->r > 0)
                     {
                         XMMerror = _mm_add_pd(XMMerror, _mm_cvtps_pd(_mm_and_ps(
@@ -618,14 +618,14 @@ void sg(vector<mf_node*> &ptrs, mf_model &model, Scheduler &sched,
             mf_float z1 = 0;
             switch(param.solver)
             {
-                case SQ_MF:
+                case P_L2_MFR:
                     XMMz = _mm256_sub_ps(_mm256_set1_ps(N->r-z), XMMz);
                     XMMloss = _mm_add_pd(XMMloss,
                               _mm_cvtps_pd(_mm256_castps256_ps128(
                               _mm256_mul_ps(XMMz, XMMz))));
                     XMMerror = XMMloss;
                     break;
-                case AE_MF:
+                case P_L1_MFR:
                     _mm_store_ss(&z1, _mm256_castps256_ps128(XMMz));
                     XMMz = _mm256_sub_ps(_mm256_set1_ps(N->r), XMMz);
                     XMMloss = _mm_add_pd(XMMloss, _mm_cvtps_pd(_mm256_castps256_ps128(
@@ -638,7 +638,7 @@ void sg(vector<mf_node*> &ptrs, mf_model &model, Scheduler &sched,
                            _mm256_set1_ps(0.0f), _CMP_LT_OS), _mm256_set1_ps(-1.0f))); 
                     _mm_store_ss(&z1, _mm256_castps256_ps128(XMMz));
                     break;
-                case LR_MF:
+                case P_LR_MFC:
                     _mm_store_ss(&z, _mm256_castps256_ps128(XMMz));
                     if(N->r > 0)
                     {
@@ -654,7 +654,7 @@ void sg(vector<mf_node*> &ptrs, mf_model &model, Scheduler &sched,
                     }
                     XMMerror = XMMloss;
                     break;
-                case SQ_HINGE_MF:
+                case P_L2_MFC:
                     if(N->r > 0)
                     {
                         __m128 mask = _mm_cmpgt_ps(_mm256_castps256_ps128(XMMz),
@@ -677,7 +677,7 @@ void sg(vector<mf_node*> &ptrs, mf_model &model, Scheduler &sched,
                               _mm_mul_ps(_mm256_castps256_ps128(XMMz),
                               _mm256_castps256_ps128(XMMz))));
                     break;
-                case HINGE_MF:
+                case P_L1_MFC:
                     if(N->r > 0)
                     {
                         XMMerror = _mm_add_pd(XMMerror, _mm_cvtps_pd(_mm_and_ps(
@@ -746,12 +746,12 @@ void sg(vector<mf_node*> &ptrs, mf_model &model, Scheduler &sched,
 
             switch(param.solver)
             {
-                case SQ_MF:
+                case P_L2_MFR:
                     z = N->r-z;
                     loss += z*z;
                     error = loss;
                     break;
-                case AE_MF:
+                case P_L1_MFR:
                     z = N->r-z;
                     loss += abs(z);
                     error = loss;
@@ -760,7 +760,7 @@ void sg(vector<mf_node*> &ptrs, mf_model &model, Scheduler &sched,
                     else if(z < 0)
                         z = -1;
                     break;
-                case LR_MF:
+                case P_LR_MFC:
                     if(N->r > 0)
                     {
                         z = exp(-z);
@@ -776,7 +776,7 @@ void sg(vector<mf_node*> &ptrs, mf_model &model, Scheduler &sched,
                         z = -z/(1+z);
                     }
                     break;
-                case SQ_HINGE_MF:
+                case P_L2_MFC:
                     if(N->r > 0)
                     {
                         error += z > 0? 1: 0;
@@ -789,7 +789,7 @@ void sg(vector<mf_node*> &ptrs, mf_model &model, Scheduler &sched,
                     }
                     loss += z*z;
                     break;
-                case HINGE_MF:
+                case P_L1_MFC:
                     if(N->r > 0)
                     {
                         loss += max(0.0f, 1-z);
@@ -1005,20 +1005,20 @@ mf_double Utility::calc_error(mf_node const *R, mf_long const size, mf_model con
         mf_float z = mf_predict(&model, N.u, N.v);
         switch(solver)
         {
-            case AE_MF:
+            case P_L1_MFR:
                 error += abs(N.r-z);
                 break;
-            case SQ_MF:
+            case P_L2_MFR:
                 error += pow(N.r-z, 2);
                 break;
-            case LR_MF:
+            case P_LR_MFC:
                 if(N.r > 0)
                     error += log(1.0+exp(-z));
                 else
                     error += log(1.0+exp(z));
                 break;
-            case SQ_HINGE_MF:
-            case HINGE_MF:
+            case P_L2_MFC:
+            case P_L1_MFC:
                 if(N.r > 0)
                     error += z > 0? 1: 0;
                 else
@@ -1036,17 +1036,17 @@ string Utility::get_error_legend()
 {
     switch(solver)
     {
-        case AE_MF:
-            return string("mae");
-            break;
-        case SQ_MF:
+        case P_L2_MFR:
             return string("rmse");
             break;
-        case LR_MF:
+        case P_L1_MFR:
+            return string("mae");
+            break;
+        case P_LR_MFC:
             return string("logloss");
             break;
-        case SQ_HINGE_MF:
-        case HINGE_MF:
+        case P_L2_MFC:
+        case P_L1_MFC:
             return string("accuracy");
             break;
         default:
@@ -1364,20 +1364,20 @@ shared_ptr<mf_model> fpsg(
 
     mf_float std_dev = 1;
 
-    if(param.solver == SQ_MF || param.solver == AE_MF)
+    if(param.solver == P_L2_MFR || param.solver == P_L1_MFR)
     {
         std_dev = max((mf_float)1e-4, util.calc_std_dev(*tr));
         util.scale_problem(*tr, 1.0/std_dev);
         util.scale_problem(*va, 1.0/std_dev);
         switch(param.solver)
         {
-            case SQ_MF:
+            case P_L2_MFR:
                 param.lambda_p2 /= std_dev;
                 param.lambda_q2 /= std_dev;
                 param.lambda_p1 /= pow(std_dev, 1.5);
                 param.lambda_q1 /= pow(std_dev, 1.5);
                 break;
-            case AE_MF:
+            case P_L1_MFR:
                 param.lambda_p1 /= sqrt(std_dev);
                 param.lambda_q1 /= sqrt(std_dev);
                 break;
@@ -1440,12 +1440,12 @@ shared_ptr<mf_model> fpsg(
 
             switch(param.solver)
             {
-                case SQ_MF:
+                case P_L2_MFR:
                     reg = reg1*sqrt(std_dev)+reg2*std_dev;
                     tr_loss *= std_dev*std_dev;
                     tr_error = sqrt(tr_error*std_dev*std_dev);
                     break;
-                case AE_MF:
+                case P_L1_MFR:
                     reg = reg1*sqrt(std_dev)+reg2*std_dev;
                     tr_loss *= std_dev;
                     tr_error *= std_dev;
@@ -1464,10 +1464,10 @@ shared_ptr<mf_model> fpsg(
                 mf_double va_error = util.calc_error(va->R, va->nnz, *model)/va->nnz;
                 switch(param.solver)
                 {
-                    case SQ_MF:
+                    case P_L2_MFR:
                         va_error = sqrt(va_error*std_dev*std_dev);
                         break;
-                    case AE_MF:
+                    case P_L1_MFR:
                         va_error *= std_dev;
                         break;
                 }
@@ -1507,10 +1507,10 @@ shared_ptr<mf_model> fpsg(
 
         switch(param.solver)
         {
-            case SQ_MF:
+            case P_L2_MFR:
                 *cv_error = sqrt(*cv_error*std_dev*std_dev);
                 break;
-            case AE_MF:
+            case P_L1_MFR:
                 *cv_error *= std_dev;
                 break;
         }
@@ -2010,7 +2010,7 @@ mf_parameter mf_get_default_param()
     param.do_nmf = false;
     param.quiet = false;
     param.copy_data = true;
-    param.solver = SQ_MF;
+    param.solver = P_L2_MFR;
 
     return param;
 }
