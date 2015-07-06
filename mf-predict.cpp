@@ -32,8 +32,10 @@ string predict_help()
 "\t 1 -- Mean absolute error\n"
 "\t 5 -- Logistic error\n"
 "\t 6 -- Accuracy\n"
-"\t10 -- Mean percentile rank\n"
-"\t11 -- Area under ROC curve\n");
+"\t10 -- Row-wise Mean percentile rank\n"
+"\t11 -- Column-wise Mean percentile rank\n"
+"\t12 -- Row-wise Area under ROC curve\n"
+"\t13 -- Column-wise Area under ROC curve\n");
 }
 
 Option parse_option(int argc, char **argv)
@@ -58,7 +60,8 @@ Option parse_option(int argc, char **argv)
             option.eval = atoi(argv[i]);
             if(option.eval != RMSE && option.eval != MAE &&
                option.eval != LOGLOSS && option.eval != ACC &&
-               option.eval != AUC  && option.eval != MPR)
+               option.eval != ROW_AUC && option.eval != COL_AUC &&
+               option.eval != ROW_MPR && option.eval != COL_MPR)
                 throw invalid_argument("unknown evaluation criterion");
         }
         else
@@ -134,19 +137,27 @@ void predict(string test_path, string model_path, string output_path, mf_int eva
             cout << fixed << setprecision(4) << "ACCURACY = " << acc << endl;
             break;
         }
-        case AUC:
+        case ROW_AUC:
         {
             auto row_wise_auc = calc_auc(&prob, model, false);
+            cout << fixed << setprecision(4) <<  "Row-wise AUC = " << row_wise_auc << endl;
+            break;
+        }
+        case COL_AUC:
+        {
             auto col_wise_auc = calc_auc(&prob, model, true);
-            cout << fixed << setprecision(4) <<  "  Row-wise AUC = " << row_wise_auc << endl;
             cout << fixed << setprecision(4) <<  "Colmn-wise AUC = " << col_wise_auc << endl;
             break;
         }
-        case MPR:
+        case ROW_MPR:
         {
             auto row_wise_mpr = calc_mpr(&prob, model, false);
+            cout << fixed << setprecision(4) <<  "Row-wise MPR = " << row_wise_mpr << endl;
+            break;
+        }
+        case COL_MPR:
+        {
             auto col_wise_mpr = calc_mpr(&prob, model, true);
-            cout << fixed << setprecision(4) <<  "   Row-wise MPR = " << row_wise_mpr << endl;
             cout << fixed << setprecision(4) <<  "Column-wise MPR = " << col_wise_mpr << endl;
             break;
         }
