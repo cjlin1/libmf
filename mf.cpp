@@ -1727,7 +1727,6 @@ pair<mf_double, mf_double> calc_mpr_auc(mf_problem *prob, mf_model *model, bool 
 
     mf_float all_u_mpr = 0;
     mf_float all_u_auc = 0;
-    double st = omp_get_wtime();
 #if defined USEOMP
 #pragma omp parallel for schedule(static) reduction(+: all_u_mpr, all_u_auc)
 #endif
@@ -1752,88 +1751,40 @@ pair<mf_double, mf_double> calc_mpr_auc(mf_problem *prob, mf_model *model, bool 
         mf_double u_mpr = 0;
         mf_double u_auc = 0;
 
-        if(pos_cnts[i+1]-pos_cnts[i] < 2000)
+        mf_int index[pos_cnts[i+1]-pos_cnts[i]];
+        for(mf_int j = pos_cnts[i]; j < pos_cnts[i+1]; j++)
         {
-            mf_int index[pos_cnts[i+1]-pos_cnts[i]];
-            for(mf_int j = pos_cnts[i]; j < pos_cnts[i+1]; j++)
+            if(prob->R[j].r > 0)
             {
-                if(prob->R[j].r > 0)
-                {
-                    mf_int col = prob->R[j].*col_ptr;
-                    row[col].first.r = prob->R[j].r;
-                    index[pos] = col;
-                    pos++;
-                }
-            }
-            neg = n - pos;
-            mf_int count = 0;
-            for(mf_int k = 0; k < pos; k++)
-            {
-                swap(row[count], row[index[k]]);
-                count++;
-            }
-            sort(row.begin(), row.begin()+pos, sort_by_pred);
-
-            for(auto neg_it = row.begin()+pos; neg_it != row.end(); neg_it++)
-            {
-                if(pos < 128)
-                {
-                    mf_int accu = 0;
-                    for(auto pos_it = row.begin(); pos_it != row.begin()+pos; pos_it++)
-                    {
-                        if(neg_it->second > pos_it->second)
-                            accu++;
-                        else
-                            break;
-                    }
-                    u_mpr += accu;
-                    u_auc += pos - accu;
-                }
-                else
-                {
-                    mf_int left = 0;
-                    mf_int right = pos - 1;
-                    while(left <= right)
-                    {
-                        mf_int mid = (left + right)/2;
-                        if(row[mid].second >= neg_it->second)
-                            right = mid - 1;
-                        else
-                            left = mid + 1;
-                    }
-                    u_mpr += left;
-                    u_auc += pos - left;
-                }
-            }
-
-            if(neg > 0 && pos > 0)
-            {
-                u_mpr /= neg;
-                u_auc /= neg*pos;
-                all_u_mpr += u_mpr;
-                all_u_auc += u_auc;
+                mf_int col = prob->R[j].*col_ptr;
+                row[col].first.r = prob->R[j].r;
+                index[pos] = col;
+                pos++;
             }
         }
-        else
+        neg = n - pos;
+        mf_int count = 0;
+        for(mf_int k = 0; k < pos; k++)
         {
-            for(mf_int j = pos_cnts[i]; j < pos_cnts[i+1]; j++)
-                row[prob->R[j].*col_ptr].first.r = prob->R[j].r;
+            swap(row[count], row[index[k]]);
+            count++;
+        }
+        sort(row.begin(), row.begin()+pos, sort_by_pred);
 
-            sort(row.begin(), row.end(), sort_by_pred);
-
-            for(auto current = row.begin(); current != row.end(); current++)
+        for(auto neg_it = row.begin()+pos; neg_it != row.end(); neg_it++)
+        {
+            mf_int left = 0;
+            mf_int right = pos - 1;
+            while(left <= right)
             {
-                if(current->first.r > 0)
-                {
-                    u_auc += neg;
-                    pos++;
-                }
+                mf_int mid = (left + right)/2;
+                if(row[mid].second >= neg_it->second)
+                    right = mid - 1;
                 else
-                {
-                    u_mpr += pos;
-                    neg++;
-                }
+                    left = mid + 1;
             }
+            u_mpr += left;
+            u_auc += pos - left;
 
             if(neg > 0 && pos > 0)
             {
@@ -1846,8 +1797,6 @@ pair<mf_double, mf_double> calc_mpr_auc(mf_problem *prob, mf_model *model, bool 
     }
     all_u_mpr /= prob->nnz;
     all_u_auc /= m;
-    double ed = omp_get_wtime();
-    printf("Elapsed time of mpr and auc is %f seconds.\n", ed - st);    
     return make_pair(all_u_mpr, all_u_auc);
 }
 

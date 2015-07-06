@@ -18,7 +18,7 @@ typedef int mf_int;
 typedef long long mf_long;
 
 enum {SQ_MF=0, LR_MF=5, SQ_HINGE_MF=6, ROW_BPR=10, COL_BPR=11};
-enum {RMSE=0, LOGLOSS=1, ACC=2, MPR=10, AUC=11};
+enum {RMSE=0, LOGLOSS=1, ACC=2, ROW_MPR=10, COL_MPR=11, ROW_AUC=12, COL_AUC=13};
 
 struct mf_node
 {
