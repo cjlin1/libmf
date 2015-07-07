@@ -41,28 +41,6 @@ namespace // unnamed namespace
 mf_int const kALIGNByte = 32;
 mf_int const kALIGN = kALIGNByte/sizeof(mf_float);
 
-vector<string> tokenize(string str)
-{
-    vector<string> tokens;
-
-    if(str.empty())
-        return tokens;
-
-    basic_string<char>::size_type begin = 0, end = 0;
-    while((end = str.find_first_of(" ", begin)) != string::npos)
-    {
-        string token = str.substr(begin, end-begin);
-        if(token.size() != 0)
-            tokens.push_back(token);
-        begin = end + 1;
-    }
-    string tail = str.substr(begin);
-    if(tail.size() != 0)
-        tokens.push_back(tail);
-
-    return tokens;
-}
-
 class Scheduler
 {
 public:
@@ -106,8 +84,8 @@ Scheduler::Scheduler(mf_int nr_bins, mf_int nr_threads, vector<mf_int> cv_blocks
       counts(nr_bins*nr_bins, 0), 
       busy_p_blocks(nr_bins, 0), 
       busy_q_blocks(nr_bins, 0), 
-      cv_blocks(cv_blocks.begin(), cv_blocks.end()),
       block_losses(nr_bins*nr_bins, 0),
+      cv_blocks(cv_blocks.begin(), cv_blocks.end()),
       distribution(0.0, 1.0) 
 {
     for(mf_int i = 0; i < nr_bins*nr_bins; i++)
@@ -687,9 +665,9 @@ void Utility::shuffle_problem(
     for(mf_long i = 0; i < prob.nnz; i++)
     {
         mf_node &N = prob.R[i];
-        if(N.u < p_map.size())
+        if(N.u < (mf_long)p_map.size())
             N.u = p_map[N.u];
-        if(N.v < q_map.size())
+        if(N.v < (mf_long)q_map.size())
             N.v = q_map[N.v];
     }
 }
@@ -811,7 +789,7 @@ mf_model* Utility::init_model(shared_ptr<mf_problem> prob, mf_int k_real, mf_int
     set<mf_int> u_set;
     set<mf_int> v_set;
 
-    for (mf_int i=0; i<prob->nnz; i++)
+    for(mf_long i = 0; i < prob->nnz; i++)
     {
         u_set.insert(prob->R[i].u);
         v_set.insert(prob->R[i].v);
@@ -820,13 +798,13 @@ mf_model* Utility::init_model(shared_ptr<mf_problem> prob, mf_int k_real, mf_int
     auto init1 = [&](mf_float *start_ptr, mf_int count, set<mf_int> nz_set)
     {
         memset(start_ptr, 0, sizeof(mf_float)*count*model->k);
-        for (mf_long i = 0; i < count; i++)
+        for(mf_long i = 0; i < count; i++)
         {
             mf_float *ptr = start_ptr+i*model->k;
             for(mf_long d = 0; d < k_real; d++, ptr++)
                 *ptr = numeric_limits<mf_float>::quiet_NaN();
         }
-        for (auto it = nz_set.begin(); it != nz_set.end(); it++)
+        for(auto it = nz_set.begin(); it != nz_set.end(); it++)
         {
             mf_float * ptr = start_ptr + (mf_long)(*it)*model->k;
             for(mf_long d = 0; d < k_real; d++, ptr++)
@@ -853,7 +831,7 @@ vector<mf_int> Utility::gen_random_map(mf_int size)
 vector<mf_int> Utility::gen_inv_map(vector<mf_int> &map)
 {
     vector<mf_int> inv_map(map.size());
-    for(mf_int i = 0; i < map.size(); i++)
+    for(mf_int i = 0; i < (mf_long)map.size(); i++)
       inv_map[map[i]] = i;
     return inv_map;
 }
@@ -1177,7 +1155,6 @@ mf_float mf_cross_validation(
     }
 
     mf_double loss = 0;
-    mf_int idx = 0;
     mf_long count = 0;
     for(mf_int fold = 0; fold < nr_folds; fold++)
     {
