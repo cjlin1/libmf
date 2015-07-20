@@ -50,6 +50,7 @@ struct mf_model
     mf_int m;
     mf_int n;
     mf_int k;
+    mf_float b;
     mf_float *P;
     mf_float *Q;
 };
