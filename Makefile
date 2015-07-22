@@ -5,7 +5,7 @@ SHVER = 1
 # run `make clean all' if you change the following flags.
 
 # comment the following flag if you do not want to use SSE
-DFLAG = -DUSESSE
+#DFLAG = -DUSESSE
 
 # uncomment the following flags if you want to use AVX
 #DFLAG = -DUSEAVX

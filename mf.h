@@ -48,6 +48,7 @@ struct mf_parameter
     mf_float eta;
     mf_int do_nmf;
     mf_int quiet; 
+    mf_int disk;
     mf_int copy_data;
     mf_int solver;
 };
@@ -78,6 +79,11 @@ struct mf_model* mf_train(
 struct mf_model* mf_train_with_validation(
     struct mf_problem const *tr, 
     struct mf_problem const *va, 
+    struct mf_parameter param);
+
+struct mf_model* mf_train_with_validation_on_disk(
+    char const *tr_path,
+    struct mf_problem const *va,
     struct mf_parameter param);
 
 mf_float mf_cross_validation(

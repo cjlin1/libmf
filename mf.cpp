@@ -18,6 +18,8 @@
 #include <utility>
 #include <cmath>
 #include <stdexcept>
+#include <map>
+#include <tuple>
 
 #include "mf.h"
 
@@ -832,6 +834,121 @@ void sg(vector<mf_node*> &ptrs, mf_model &model, Scheduler &sched,
 #endif
 }
 
+void sg_on_disk(map<mf_int, fstream> &blocks, vector<mf_long> &counts, mf_model &model, Scheduler &sched,
+        mf_parameter param, bool &slow_only, mf_float *PG, mf_float *QG)
+{
+    mf_float * P = model.P;
+    mf_float * Q = model.Q;
+    mf_float rk_slow = 1.0/kALIGN;
+    mf_float rk_fast = 1.0/(model.k-kALIGN);
+    while(true)
+    {
+        mf_int bid = sched.get_job();
+        mf_double loss = 0;
+        mf_double error = 0;
+        for(mf_long i = 0; i < counts[bid]; i++)
+        {
+            mf_node N;
+            blocks[bid].read((char*)&N.u, sizeof(mf_int));
+            blocks[bid].read((char*)&N.v, sizeof(mf_int));
+            blocks[bid].read((char*)&N.r, sizeof(mf_float));
+            mf_float *p = P+(mf_long)N.u*model.k;
+            mf_float *q = Q+(mf_long)N.v*model.k;
+            mf_float *pG = PG+N.u*2;
+            mf_float *qG = QG+N.v*2;
+
+            mf_float z = 0;
+            for(mf_int d = 0; d < model.k; d++)
+                z += p[d]*q[d];
+
+            switch(param.solver)
+            {
+                case P_L2_MFR:
+                    z = N.r-z;
+                    loss += z*z;
+                    error = loss;
+                    break;
+                case P_L1_MFR:
+                    z = N.r-z;
+                    loss += abs(z);
+                    error = loss;
+                    if(z > 0)
+                        z = 1;
+                    else if(z < 0)
+                        z = -1;
+                    break;
+                case P_LR_MFC:
+                    if(N.r > 0)
+                    {
+                        z = exp(-z);
+                        loss += log(1+z);
+                        error = loss;
+                        z = z/(1+z);
+                    }
+                    else
+                    {
+                        z = exp(z);
+                        loss += log(1+z);
+                        error = loss;
+                        z = -z/(1+z);
+                    }
+                    break;
+                case P_L2_MFC:
+                    if(N.r > 0)
+                    {
+                        error += z > 0? 1: 0;
+                        z = max(0.0f, 1-z);
+                    }
+                    else
+                    {
+                        error += z < 0? 1: 0;
+                        z = min(0.0f, -1-z); // -max(0, 1+z) = min(0, -1-z)
+                    }
+                    loss += z*z;
+                    break;
+                case P_L1_MFC:
+                    if(N.r > 0)
+                    {
+                        loss += max(0.0f, 1-z);
+                        error += z > 0? 1: 0;
+                        z = z > 1? 0: 1; // 1-z < 0? 0: 1 <===> 1-z >=0? 1: 0
+                    }
+                    else
+                    {
+                        loss += max(0.0f, 1+z);
+                        error += z < 0? 1: 0;
+                        z = z < -1? 0: -1; // 1+z < 0? 0: -1 <===> 1+z >=0? -1: 0
+                    }
+                    break;
+                default:
+                    throw invalid_argument("unknown loss function");
+                    break;
+            }
+
+            sg_update(p, q, pG, qG, 0, kALIGN, param.eta,
+                      param.lambda_p1, param.lambda_q1,
+                      param.lambda_p2, param.lambda_q2,
+                      z, rk_slow, param.do_nmf);
+
+            if(slow_only)
+                continue;
+
+            pG++;
+            qG++;
+
+            sg_update(p, q, pG, qG, kALIGN, model.k, param.eta,
+                      param.lambda_p1, param.lambda_q1,
+                      param.lambda_p2, param.lambda_q2,
+                      z, rk_fast, param.do_nmf);
+
+        }
+        blocks[bid].seekg(0);
+        sched.put_job(bid, loss, error);
+        if(sched.is_terminated())
+            break;
+    }
+}
+
 class Utility
 {
 public:
@@ -852,6 +969,7 @@ public:
     static vector<mf_int> gen_random_map(mf_int size);
     static mf_float* malloc_aligned_float(mf_long size);
     static mf_model* init_model(shared_ptr<mf_problem> prob, mf_int k_real, mf_int k_aligned);
+    static mf_model* init_model_on_disk(mf_int m, mf_int n, set<mf_int> u_set, set<mf_int> v_set, mf_int k_real, mf_int k_aligned);
     static mf_float inner_product(mf_float *p, mf_float *q, mf_int k);
     static vector<mf_int> gen_inv_map(vector<mf_int> &map);
     static void shrink_model(mf_model &model, mf_int k_new);
@@ -1212,6 +1330,48 @@ mf_model* Utility::init_model(shared_ptr<mf_problem> prob, mf_int k_real, mf_int
     return model;
 }
 
+mf_model* Utility::init_model_on_disk(mf_int m, mf_int n, set<mf_int> u_set, set<mf_int> v_set, mf_int k_real, mf_int k_aligned)
+{
+    mf_model *model = new mf_model;
+
+    model->m = m;
+    model->n = n;
+    model->k = k_aligned;
+    model->P = nullptr;
+    model->Q = nullptr;
+
+    mf_float scale = sqrt(1.0/k_real);
+    default_random_engine generator;
+    uniform_real_distribution<mf_float> distribution(0.0, 1.0);
+
+    try
+    {
+        model->P = Utility::malloc_aligned_float((mf_long)model->m*model->k);
+        model->Q = Utility::malloc_aligned_float((mf_long)model->n*model->k);
+    }
+    catch(bad_alloc const &e)
+    {
+        mf_destroy_model(&model);
+        throw;
+    }
+
+    auto init1 = [&](mf_float *start_ptr, mf_int count, set<mf_int> nz_set)
+    {
+        memset(start_ptr, 0, sizeof(mf_float)*count*model->k);
+        for (auto it = nz_set.begin(); it != nz_set.end(); it++)
+        {
+            mf_float * ptr = start_ptr + (mf_long)(*it)*model->k;
+            for(mf_long d = 0; d < k_real; d++, ptr++)
+                *ptr = (mf_float)(distribution(generator)*scale);
+        }
+    };
+
+    init1(model->P, m, u_set);
+    init1(model->Q, n, v_set);
+
+    return model;
+}
+
 vector<mf_int> Utility::gen_random_map(mf_int size)
 {
     srand(0);
@@ -1534,6 +1694,305 @@ shared_ptr<mf_model> fpsg(
     return model;
 }
 
+shared_ptr<mf_model> fpsg_on_disk(
+    char const *tr_path,
+    mf_problem const *va_,
+    mf_parameter param)
+{
+    param.nr_bins = max(param.nr_bins, 2*param.nr_threads); //there may be other choice
+    Utility util(param.solver, param.nr_threads);
+
+    shared_ptr<mf_problem> va;
+
+    if(param.copy_data)
+    {
+        struct deleter
+        {
+            void operator() (mf_problem *prob)
+            {
+                delete[] prob->R;
+                delete prob;
+            }
+        };
+        va = shared_ptr<mf_problem>(Utility::copy_problem(va_, true), deleter());
+    }
+    else
+    {
+        va = shared_ptr<mf_problem>(Utility::copy_problem(va_, false));
+    }
+
+    fstream tr_(tr_path);
+    if(!tr_.is_open())
+        throw runtime_error("cannot open " + string(tr_path));
+
+    mf_int m = 0;
+    mf_int n = 0;
+    mf_long nnz = 0;
+    mf_double avg = 0;
+    mf_double _std_dev = 0;
+    map<mf_int, fstream> blocks;
+    vector<mf_long> counts(param.nr_bins*param.nr_bins, 0);
+
+    for(mf_node N; tr_ >> N.u >> N.v >> N.r;)
+    {
+        if(N.u+1 > m)
+            m = N.u+1;
+        if(N.v+1 > n)
+            n = N.v+1;
+        nnz++;
+        avg += N.r;
+    }
+
+    avg /= nnz;
+
+    tr_.clear();
+    tr_.seekg(0);
+
+    for(mf_node N; tr_ >> N.u >> N.v >> N.r;)
+    {
+        _std_dev += (N.r-avg) * (N.r-avg);
+    }
+    _std_dev = sqrt(_std_dev/nnz);
+
+    mf_float std_dev = 1;
+
+    if(param.solver == P_L2_MFR || param.solver == P_L1_MFR)
+    {
+        std_dev = max((mf_float)1e-4, (mf_float)_std_dev);
+        util.scale_problem(*va, 1.0/std_dev);
+        switch(param.solver)
+        {
+            case P_L2_MFR:
+                param.lambda_p2 /= std_dev;
+                param.lambda_q2 /= std_dev;
+                param.lambda_p1 /= pow(std_dev, 1.5);
+                param.lambda_q1 /= pow(std_dev, 1.5);
+                break;
+            case P_L1_MFR:
+                param.lambda_p1 /= sqrt(std_dev);
+                param.lambda_q1 /= sqrt(std_dev);
+                break;
+        }
+    }
+
+    vector<mf_int> p_map = Utility::gen_random_map(m);
+    vector<mf_int> q_map = Utility::gen_random_map(n);
+
+    util.shuffle_problem(*va, p_map, q_map);
+
+    for(mf_int i = 0; i < param.nr_bins*param.nr_bins; i++)
+    {
+        char buf[20];
+        sprintf(buf, "%d", i);
+        string str = string(tr_path)+string(".block")+string(buf);
+
+        // Create a fstream
+        blocks.emplace(piecewise_construct, std::forward_as_tuple(i),
+                std::forward_as_tuple(str, fstream::in|fstream::out|fstream::trunc|fstream::binary));
+
+        // Check if the fstream is opened sucessfully
+        if(!blocks[i].is_open())
+            cout << str << " error" << endl;
+    }
+
+    mf_int seg_p = (mf_int)ceil((double)m/param.nr_bins);
+    mf_int seg_q = (mf_int)ceil((double)n/param.nr_bins);
+
+    auto get_block = [=] (mf_int u, mf_int v)
+    {
+        return (u/seg_p)*param.nr_bins+v/seg_q;
+    };
+
+    tr_.clear();
+    tr_.seekg(0);
+
+    vector<mf_int> omega_p(m, 0), omega_q(n, 0);
+    set<mf_int> u_set;
+    set<mf_int> v_set;
+
+    for(mf_node N; tr_ >> N.u >> N.v >> N.r;)
+    {
+        N.u = p_map[N.u];   //shuffle tr
+        N.v = q_map[N.v];   //shuffle tr
+        if(std_dev != 1)
+            N.r /= std_dev;     //scale tr
+        mf_int bid = get_block(N.u, N.v);   //grid_into_block
+        blocks[bid].write((char*)&N.u, sizeof(mf_int));
+        blocks[bid].write((char*)&N.v, sizeof(mf_int));
+        blocks[bid].write((char*)&N.r, sizeof(mf_float));
+        counts[bid]++;
+        u_set.insert(N.u);
+        v_set.insert(N.v);
+        omega_p[N.u]++;
+        omega_q[N.v]++;
+    }
+
+    for(mf_int i = 0; i < param.nr_bins*param.nr_bins; i++)
+    {
+        blocks[i].clear();
+        blocks[i].seekg(0);
+    }
+
+    struct sort_node_by_p
+    {
+        bool operator() (mf_node const &lhs, mf_node const &rhs)
+        {
+            return tie(lhs.u, lhs.v) < tie(rhs.u, rhs.v);
+        }
+    };
+
+    struct sort_node_by_q
+    {
+        bool operator() (mf_node const &lhs, mf_node const &rhs)
+        {
+            return tie(lhs.v, lhs.u) < tie(rhs.v, rhs.u);
+        }
+    };
+
+    for(mf_int i = 0; i < param.nr_bins*param.nr_bins; i++)
+    {
+        vector<mf_node> nodes(counts[i]);
+        for(mf_long j = 0; j < counts[i]; j++)
+        {
+            mf_node N;
+            blocks[i].read((char*)&N.u, sizeof(mf_int));
+            blocks[i].read((char*)&N.v, sizeof(mf_int));
+            blocks[i].read((char*)&N.r, sizeof(mf_float));
+            nodes[j] = N;
+        }
+        if(m > n)
+            sort(nodes.begin(), nodes.end(), sort_node_by_p());
+        else
+            sort(nodes.begin(), nodes.end(), sort_node_by_q());
+        blocks[i].clear();
+        blocks[i].seekg(0);
+        for(mf_long j = 0; j < counts[i]; j++)
+        {
+            blocks[i].write((char*)&nodes[j].u, sizeof(mf_int));
+            blocks[i].write((char*)&nodes[j].v, sizeof(mf_int));
+            blocks[i].write((char*)&nodes[j].r, sizeof(mf_float));
+        }
+        blocks[i].clear();
+        blocks[i].seekg(0);
+    }
+
+    mf_int k_aligned = (mf_int)ceil(mf_double(param.k)/kALIGN)*kALIGN;
+
+    shared_ptr<mf_model> model(Utility::init_model_on_disk(m, n, u_set, v_set, param.k, k_aligned),
+                               [] (mf_model *ptr) { mf_destroy_model(&ptr); });
+
+    Scheduler sched(param.nr_bins, param.nr_threads, vector<mf_int>());
+
+    bool slow_only = param.lambda_p1 == 0 && param.lambda_q1 == 0? true: false;
+
+    vector<mf_float> PG(model->m*2, 1), QG(model->n*2, 1);
+
+#if defined USESSE || defined USEAVX
+    auto flush_zero_mode = _MM_GET_FLUSH_ZERO_MODE();
+    _MM_SET_FLUSH_ZERO_MODE(_MM_FLUSH_ZERO_ON);
+#endif
+
+    if(!param.quiet)
+    {
+        cout.width(4);
+        cout << "iter";
+        cout.width(13);
+        cout << "tr_"+util.get_error_legend();
+        if(va->nnz != 0)
+        {
+            cout.width(13);
+            cout << "va_"+util.get_error_legend();
+        }
+        cout.width(13);
+        cout << "obj";
+        cout << "\n";
+    }
+
+    vector<thread> threads;
+    for(mf_int i = 0; i < param.nr_threads; i++)
+        threads.emplace_back(sg_on_disk, ref(blocks), ref(counts), ref(*model),
+                ref(sched), param, ref(slow_only), PG.data(), QG.data());
+
+    for(mf_int iter = 0; iter < param.nr_iters; iter++)
+    {
+        sched.wait_for_jobs_done();
+
+        if(!param.quiet)
+        {
+            mf_double reg = 0;
+            mf_double reg1 = util.calc_reg1(*model, param.lambda_p1,
+                             param.lambda_q1, omega_p, omega_q);
+            mf_double reg2 = util.calc_reg2(*model, param.lambda_p2,
+                             param.lambda_q2, omega_p, omega_q);
+            mf_double tr_loss = sched.get_loss();
+            mf_double tr_error = sched.get_error()/nnz;
+
+            switch(param.solver)
+            {
+                case P_L2_MFR:
+                    reg = reg1*sqrt(std_dev)+reg2*std_dev;
+                    tr_loss *= std_dev*std_dev;
+                    tr_error = sqrt(tr_error*std_dev*std_dev);
+                    break;
+                case P_L1_MFR:
+                    reg = reg1*sqrt(std_dev)+reg2*std_dev;
+                    tr_loss *= std_dev;
+                    tr_error *= std_dev;
+                    break;
+                default:
+                    reg = reg1+reg2;
+                    break;
+            }
+
+            cout.width(4);
+            cout << iter;
+            cout.width(13);
+            cout << fixed << setprecision(4) << tr_error;
+            if(va->nnz != 0)
+            {
+                mf_double va_error = util.calc_error(va->R, va->nnz, *model)/va->nnz;
+                switch(param.solver)
+                {
+                    case P_L2_MFR:
+                        va_error = sqrt(va_error*std_dev*std_dev);
+                        break;
+                    case P_L1_MFR:
+                        va_error *= std_dev;
+                        break;
+                }
+
+                cout.width(13);
+                cout << fixed << setprecision(4) << va_error;
+            }
+            cout.width(13);
+            cout << fixed << setprecision(4) << scientific << reg+tr_loss;
+            cout << "\n" << flush;
+        }
+
+        if(iter == 0)
+            slow_only = false;
+
+        sched.resume();
+    }
+    sched.terminate();
+
+    for(auto &thread : threads)
+        thread.join();
+
+#if defined USESSE || defined USEAVX
+    _MM_SET_FLUSH_ZERO_MODE(flush_zero_mode);
+#endif
+
+    vector<mf_int> inv_p_map = Utility::gen_inv_map(p_map);
+    vector<mf_int> inv_q_map = Utility::gen_inv_map(q_map);
+
+    util.scale_model(*model, sqrt(std_dev));
+    Utility::shrink_model(*model, param.k);
+    Utility::shuffle_model(*model, inv_p_map, inv_q_map);
+
+    return model;
+}
+
 } // unnamed namespace
 
 mf_model* mf_train_with_validation(
@@ -1542,6 +2001,28 @@ mf_model* mf_train_with_validation(
     mf_parameter param)
 {
     shared_ptr<mf_model> model = fpsg(tr, va, param);
+
+    mf_model *model_ret = new mf_model;
+
+    model_ret->m = model->m;
+    model_ret->n = model->n;
+    model_ret->k = model->k;
+
+    model_ret->P = model->P;
+    model->P = nullptr;
+
+    model_ret->Q = model->Q;
+    model->Q = nullptr;
+
+    return model_ret;
+}
+
+mf_model* mf_train_with_validation_on_disk(
+    char const *tr_path,
+    mf_problem const *va,
+    mf_parameter param)
+{
+    shared_ptr<mf_model> model = fpsg_on_disk(tr_path, va, param);
 
     mf_model *model_ret = new mf_model;
 

@@ -50,7 +50,8 @@ string train_help()
 "-p <path>: set path to the validation set\n"
 "-v <fold>: set number of folds for cross validation\n"
 "--quiet: quiet mode (no outputs)\n"
-"--nmf: perform non-negative matrix factorization\n");
+"--nmf: perform non-negative matrix factorization\n"
+"--disk: train on disk\n");
 }
 
 Option parse_option(int argc, char **argv)
@@ -181,6 +182,10 @@ Option parse_option(int argc, char **argv)
         {
             option.param.quiet = true;
         }
+        else if(args[i].compare("--disk") == 0)
+        {
+            option.param.disk = true;
+        }
         else
         {
             break;
@@ -189,6 +194,9 @@ Option parse_option(int argc, char **argv)
 
     if(option.nr_folds > 1 && !option.va_path.empty())
         throw invalid_argument("cannot specify -p and -v simultaneously");
+
+    if(option.nr_folds > 1 && option.param.disk == true)
+        throw invalid_argument("cannot specify -v and --disk simultaneously");
 
     if(i >= argc)
         throw invalid_argument("training data not specified");
@@ -234,7 +242,8 @@ int main(int argc, char **argv)
     mf_problem tr, va;
     try
     {
-        tr = read_problem(option.tr_path);
+        if(option.param.disk != true)
+            tr = read_problem(option.tr_path);
         va = read_problem(option.va_path);
     }
     catch(runtime_error &e)
@@ -249,8 +258,11 @@ int main(int argc, char **argv)
     }
     else
     {
-        mf_model *model = 
-            mf_train_with_validation(&tr, &va, option.param);
+        mf_model *model;
+        if(option.param.disk != true)
+            model = mf_train_with_validation(&tr, &va, option.param);
+        else
+            model = mf_train_with_validation_on_disk(option.tr_path.c_str(), &va, option.param);
 
         // use the following function if you do not have a validation set
 
@@ -263,7 +275,8 @@ int main(int argc, char **argv)
         {
             cout << "cannot save model to " << option.model_path << endl;
 
-            delete[] tr.R;
+            if(option.param.disk != true)
+                delete[] tr.R;
             delete[] va.R;
             mf_destroy_model(&model);
 
@@ -273,7 +286,8 @@ int main(int argc, char **argv)
         mf_destroy_model(&model);
     }
 
-    delete[] tr.R;
+    if(option.param.disk != true)
+        delete[] tr.R;
     delete[] va.R;
 
     return 0;
