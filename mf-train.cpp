@@ -49,6 +49,7 @@ string train_help()
 "-s <threads>: set number of threads (default 12)\n"
 "-p <path>: set path to the validation set\n"
 "-v <fold>: set number of folds for cross validation\n"
+"-n <blocks>: set number of blocks in disk-level trainning\n"
 "--quiet: quiet mode (no outputs)\n"
 "--nmf: perform non-negative matrix factorization\n"
 "--disk: train on disk\n");
@@ -174,6 +175,15 @@ Option parse_option(int argc, char **argv)
                option.param.solver != P_COL_BPR_MFOC)
                 throw invalid_argument("unknown solver type");
         }
+        else if(args[i].compare("-n") == 0)
+        {
+            if(i == argc-1)
+                throw invalid_argument("need to specify number of blocks after -n");
+            i++;
+            option.param.nr_blocks = atoi(argv[i]);
+            if(option.param.nr_blocks <= 1)
+                throw invalid_argument("number of blocks should be larger than 1");
+        }
         else if(args[i].compare("--nmf") == 0)
         {
             option.param.do_nmf = true;
@@ -240,16 +250,18 @@ int main(int argc, char **argv)
     }
 
     mf_problem tr, va;
-    try
+    if(option.param.disk != true)
     {
-        if(option.param.disk != true)
+        try
+        {
             tr = read_problem(option.tr_path);
-        va = read_problem(option.va_path);
-    }
-    catch(runtime_error &e)
-    {
-        cout << e.what() << endl;
-        return 1;
+            va = read_problem(option.va_path);
+        }
+        catch(runtime_error &e)
+        {
+            cout << e.what() << endl;
+            return 1;
+        }
     }
 
     if(option.do_cv)
@@ -262,7 +274,7 @@ int main(int argc, char **argv)
         if(option.param.disk != true)
             model = mf_train_with_validation(&tr, &va, option.param);
         else
-            model = mf_train_with_validation_on_disk(option.tr_path.c_str(), &va, option.param);
+            model = mf_train_with_validation_on_disk(option.tr_path.c_str(), option.va_path.c_str(), option.param);
 
         // use the following function if you do not have a validation set
 
@@ -276,8 +288,10 @@ int main(int argc, char **argv)
             cout << "cannot save model to " << option.model_path << endl;
 
             if(option.param.disk != true)
+            {
                 delete[] tr.R;
-            delete[] va.R;
+                delete[] va.R;
+            }
             mf_destroy_model(&model);
 
             return 1;
@@ -287,8 +301,10 @@ int main(int argc, char **argv)
     }
 
     if(option.param.disk != true)
+    {
         delete[] tr.R;
-    delete[] va.R;
+        delete[] va.R;
+    }
 
     return 0;
 }

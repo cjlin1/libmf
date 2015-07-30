@@ -40,6 +40,7 @@ struct mf_parameter
     mf_int k; 
     mf_int nr_threads;
     mf_int nr_bins;
+    mf_int nr_blocks;
     mf_int nr_iters;
     mf_float lambda_p1;
     mf_float lambda_p2;
@@ -83,7 +84,7 @@ struct mf_model* mf_train_with_validation(
 
 struct mf_model* mf_train_with_validation_on_disk(
     char const *tr_path,
-    struct mf_problem const *va,
+    char const *va_path,
     struct mf_parameter param);
 
 mf_float mf_cross_validation(

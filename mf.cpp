@@ -20,6 +20,8 @@
 #include <stdexcept>
 #include <map>
 #include <tuple>
+#include <sys/types.h>
+#include <sys/stat.h>
 
 #include "mf.h"
 
@@ -1696,30 +1698,19 @@ shared_ptr<mf_model> fpsg(
 
 shared_ptr<mf_model> fpsg_on_disk(
     char const *tr_path,
-    mf_problem const *va_,
+    char const *va_path,
     mf_parameter param)
 {
-    param.nr_bins = max(param.nr_bins, 2*param.nr_threads); //there may be other choice
+    if(param.nr_blocks != 0)
+    {
+        param.nr_bins = ceil(sqrt(param.nr_blocks));
+    }
+    param.nr_bins = max(param.nr_bins, 2*param.nr_threads);
     Utility util(param.solver, param.nr_threads);
 
     shared_ptr<mf_problem> va;
-
-    if(param.copy_data)
-    {
-        struct deleter
-        {
-            void operator() (mf_problem *prob)
-            {
-                delete[] prob->R;
-                delete prob;
-            }
-        };
-        va = shared_ptr<mf_problem>(Utility::copy_problem(va_, true), deleter());
-    }
-    else
-    {
-        va = shared_ptr<mf_problem>(Utility::copy_problem(va_, false));
-    }
+    mf_problem va_ = read_problem(va_path);
+    va = shared_ptr<mf_problem>(Utility::copy_problem(&va_, false));
 
     fstream tr_(tr_path);
     if(!tr_.is_open())
@@ -1729,7 +1720,7 @@ shared_ptr<mf_model> fpsg_on_disk(
     mf_int n = 0;
     mf_long nnz = 0;
     mf_double avg = 0;
-    mf_double _std_dev = 0;
+    mf_double avg_sq = 0;
     map<mf_int, fstream> blocks;
     vector<mf_long> counts(param.nr_bins*param.nr_bins, 0);
 
@@ -1741,24 +1732,17 @@ shared_ptr<mf_model> fpsg_on_disk(
             n = N.v+1;
         nnz++;
         avg += N.r;
+        avg_sq += N.r*N.r;
     }
 
     avg /= nnz;
-
-    tr_.clear();
-    tr_.seekg(0);
-
-    for(mf_node N; tr_ >> N.u >> N.v >> N.r;)
-    {
-        _std_dev += (N.r-avg) * (N.r-avg);
-    }
-    _std_dev = sqrt(_std_dev/nnz);
+    avg_sq/=nnz;
 
     mf_float std_dev = 1;
 
     if(param.solver == P_L2_MFR || param.solver == P_L1_MFR)
     {
-        std_dev = max((mf_float)1e-4, (mf_float)_std_dev);
+        std_dev = max((mf_float)1e-4, (mf_float)sqrt(avg_sq - avg*avg));
         util.scale_problem(*va, 1.0/std_dev);
         switch(param.solver)
         {
@@ -1779,12 +1763,16 @@ shared_ptr<mf_model> fpsg_on_disk(
     vector<mf_int> q_map = Utility::gen_random_map(n);
 
     util.shuffle_problem(*va, p_map, q_map);
+    string dirname = tr_path + string(".blocks.")+to_string(param.nr_bins*param.nr_bins);
+    if(mkdir(dirname.c_str(), 0755) != 0)
+    {
+        fprintf(stderr,"Cannot make dir %s; remove or rename the directoy if it exists\n", dirname.c_str());
+        exit(1);
+    }
 
     for(mf_int i = 0; i < param.nr_bins*param.nr_bins; i++)
     {
-        char buf[20];
-        sprintf(buf, "%d", i);
-        string str = string(tr_path)+string(".block")+string(buf);
+        string str = dirname+string("/")+string(tr_path)+string(".block")+to_string(i);
 
         // Create a fstream
         blocks.emplace(piecewise_construct, std::forward_as_tuple(i),
@@ -1826,6 +1814,8 @@ shared_ptr<mf_model> fpsg_on_disk(
         omega_p[N.u]++;
         omega_q[N.v]++;
     }
+
+    tr_.close();
 
     for(mf_int i = 0; i < param.nr_bins*param.nr_bins; i++)
     {
@@ -1979,6 +1969,9 @@ shared_ptr<mf_model> fpsg_on_disk(
     for(auto &thread : threads)
         thread.join();
 
+    for(mf_int i = 0; i < param.nr_bins*param.nr_bins; i++)
+        blocks[i].close();
+
 #if defined USESSE || defined USEAVX
     _MM_SET_FLUSH_ZERO_MODE(flush_zero_mode);
 #endif
@@ -2019,10 +2012,10 @@ mf_model* mf_train_with_validation(
 
 mf_model* mf_train_with_validation_on_disk(
     char const *tr_path,
-    mf_problem const *va,
+    char const *va_path,
     mf_parameter param)
 {
-    shared_ptr<mf_model> model = fpsg_on_disk(tr_path, va, param);
+    shared_ptr<mf_model> model = fpsg_on_disk(tr_path, va_path, param);
 
     mf_model *model_ret = new mf_model;
 
@@ -2152,6 +2145,8 @@ mf_problem read_problem(string path)
     }
     prob.R = R;
 
+    f.close();
+
     return prob;
 }
 
@@ -2179,6 +2174,8 @@ mf_int mf_save_model(mf_model const *model, char const *path)
 
     write(model->P, model->m, 'p');
     write(model->Q, model->n, 'q');
+
+    f.close();
 
     return 0;
 }
@@ -2221,6 +2218,8 @@ mf_model* mf_load_model(char const *path)
 
     read(model->P, model->m);
     read(model->Q, model->n);
+
+    f.close();
 
     return model;
 }
@@ -2450,6 +2449,7 @@ mf_parameter mf_get_default_param()
     param.k = 8;
     param.nr_threads = 12;
     param.nr_bins = 20;
+    param.nr_blocks = 0;
     param.nr_iters = 20;
     param.lambda_p1 = 0.0f;
     param.lambda_q1 = 0.0f;
