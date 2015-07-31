@@ -1763,16 +1763,25 @@ shared_ptr<mf_model> fpsg_on_disk(
     vector<mf_int> q_map = Utility::gen_random_map(n);
 
     util.shuffle_problem(*va, p_map, q_map);
-    string dirname = tr_path + string(".blocks.")+to_string(param.nr_bins*param.nr_bins);
-    if(mkdir(dirname.c_str(), 0755) != 0)
+    char dir_name[1024];
+    char tmp_path[1024];
+    strcpy(tmp_path, tr_path);
+    char *p = strrchr(tmp_path, '/');
+    if(p == NULL)
+        p = tmp_path;
+    else
+        ++p;
+    sprintf(dir_name, "%s.blocks.%d", p, param.nr_bins*param.nr_bins);
+    
+    if(mkdir(dir_name, 0755) != 0)
     {
-        fprintf(stderr,"Cannot make dir %s; remove or rename the directoy if it exists\n", dirname.c_str());
+        fprintf(stderr,"Cannot make dir %s; remove or rename the directoy if it exists\n", dir_name);
         exit(1);
     }
 
     for(mf_int i = 0; i < param.nr_bins*param.nr_bins; i++)
     {
-        string str = dirname+string("/")+string(tr_path)+string(".block")+to_string(i);
+        string str = dir_name+string("/")+string("block")+to_string(i);
 
         // Create a fstream
         blocks.emplace(piecewise_construct, std::forward_as_tuple(i),
