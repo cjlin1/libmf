@@ -460,7 +460,54 @@ inline void sg_update(
 }
 #endif
 
-void sg(vector<mf_node*> &ptrs, mf_model &model, Scheduler &sched, 
+class BlockBase
+{
+public:
+    virtual bool move_next() = 0;
+    virtual mf_node* get_current() = 0;
+    virtual void reset() = 0;
+    virtual ~BlockBase(){ };
+};
+
+class Block: public BlockBase
+{
+public:
+    Block(): first(nullptr), current(nullptr), last(nullptr){ }
+    Block(mf_node *first, mf_node *last): first(first-1), current(first-1), last(last){ }
+    ~Block(){ }
+    bool move_next() { return ++current != last; }
+    mf_node* get_current(){ return current; }
+    void reset(){ current = first; }
+private:
+    mf_node *first;
+    mf_node *current;
+    mf_node *last;
+};
+
+class BlockOnDisk: public BlockBase
+{
+public:
+    ~BlockOnDisk(){ source.close(); }
+    bool move_next()
+    {
+        source.read((char*)&node.u, sizeof(mf_int));
+        source.read((char*)&node.v, sizeof(mf_int));
+        source.read((char*)&node.r, sizeof(mf_float));
+        return source.good();
+    }
+    mf_node* get_current(){ return &node; }
+    void reset()
+    {
+        source.clear();
+        source.seekg(0);
+    }
+    void tie_to(std::string filename){ source.close(); source.open(filename); }
+private:
+    mf_node node;
+    std::ifstream source;
+};
+
+void sg(vector<BlockBase*> &p_blocks, mf_model &model, Scheduler &sched,
         mf_parameter param, bool &slow_only, mf_float *PG, mf_float *QG)
 {
     mf_float * P = model.P;
@@ -476,11 +523,12 @@ void sg(vector<mf_node*> &ptrs, mf_model &model, Scheduler &sched,
     __m128 XMMrk_fast = _mm_set1_ps(1.0/(model.k-kALIGN));
     while(true)
     {
-        mf_int block = sched.get_job();
+        mf_int bid = sched.get_job();
         __m128d XMMloss = _mm_setzero_pd();
         __m128d XMMerror = _mm_setzero_pd();
-        for(mf_node *N = ptrs[block]; N != ptrs[block+1]; N++)
+        while(p_blocks[bid]->move_next())
         {
+            mf_node *N = p_blocks[bid]->get_current();
             mf_float *p = P+(mf_long)N->u*model.k;
             mf_float *q = Q+(mf_long)N->v*model.k;
             mf_float *pG = PG+N->u*2;
@@ -586,7 +634,8 @@ void sg(vector<mf_node*> &ptrs, mf_model &model, Scheduler &sched,
         mf_double error;
         _mm_store_sd(&loss, XMMloss);
         _mm_store_sd(&error, XMMerror);
-        sched.put_job(block, loss, error);
+        p_blocks[bid]->reset();
+        sched.put_job(bid, loss, error);
         if(sched.is_terminated())
             break;
     }
@@ -600,11 +649,12 @@ void sg(vector<mf_node*> &ptrs, mf_model &model, Scheduler &sched,
     __m256 XMMrk_fast = _mm256_set1_ps(1.0/(model.k-kALIGN));
     while(true)
     {
-        mf_int block = sched.get_job();
+        mf_int bid = sched.get_job();
         __m128d XMMloss = _mm_setzero_pd();
         __m128d XMMerror = _mm_setzero_pd();
-        for(mf_node *N = ptrs[block]; N != ptrs[block+1]; N++)
+        while(p_blocks[bid]->move_next())
         {
+            mf_node *N = p_blocks[bid]->get_current();
             mf_float *p = P+(mf_long)N->u*model.k;
             mf_float *q = Q+(mf_long)N->v*model.k;
             mf_float *pG = PG+N->u*2;
@@ -725,7 +775,8 @@ void sg(vector<mf_node*> &ptrs, mf_model &model, Scheduler &sched,
         mf_double error;
         _mm_store_sd(&loss, XMMloss);
         _mm_store_sd(&error, XMMerror);
-        sched.put_job(block, loss, error);
+        p_blocks[bid]->reset();
+        sched.put_job(bid, loss, error);
         if(sched.is_terminated())
             break;
     }
@@ -734,11 +785,12 @@ void sg(vector<mf_node*> &ptrs, mf_model &model, Scheduler &sched,
     mf_float rk_fast = 1.0/(model.k-kALIGN);
     while(true)
     {
-        mf_int block = sched.get_job();
+        mf_int bid = sched.get_job();
         mf_double loss = 0;
         mf_double error = 0;
-        for(mf_node *N = ptrs[block]; N != ptrs[block+1]; N++)
+        while(p_blocks[bid]->move_next())
         {
+            mf_node* N = p_blocks[bid]->get_current();
             mf_float *p = P+(mf_long)N->u*model.k;
             mf_float *q = Q+(mf_long)N->v*model.k;
             mf_float *pG = PG+N->u*2;
@@ -829,126 +881,12 @@ void sg(vector<mf_node*> &ptrs, mf_model &model, Scheduler &sched,
                       z, rk_fast, param.do_nmf);
 
         }
-        sched.put_job(block, loss, error);
-        if(sched.is_terminated())
-            break;
-    }
-#endif
-}
-
-void sg_on_disk(map<mf_int, fstream> &blocks, vector<mf_long> &counts, mf_model &model, Scheduler &sched,
-        mf_parameter param, bool &slow_only, mf_float *PG, mf_float *QG)
-{
-    mf_float * P = model.P;
-    mf_float * Q = model.Q;
-    mf_float rk_slow = 1.0/kALIGN;
-    mf_float rk_fast = 1.0/(model.k-kALIGN);
-    while(true)
-    {
-        mf_int bid = sched.get_job();
-        mf_double loss = 0;
-        mf_double error = 0;
-        for(mf_long i = 0; i < counts[bid]; i++)
-        {
-            mf_node N;
-            blocks[bid].read((char*)&N.u, sizeof(mf_int));
-            blocks[bid].read((char*)&N.v, sizeof(mf_int));
-            blocks[bid].read((char*)&N.r, sizeof(mf_float));
-            mf_float *p = P+(mf_long)N.u*model.k;
-            mf_float *q = Q+(mf_long)N.v*model.k;
-            mf_float *pG = PG+N.u*2;
-            mf_float *qG = QG+N.v*2;
-
-            mf_float z = 0;
-            for(mf_int d = 0; d < model.k; d++)
-                z += p[d]*q[d];
-
-            switch(param.solver)
-            {
-                case P_L2_MFR:
-                    z = N.r-z;
-                    loss += z*z;
-                    error = loss;
-                    break;
-                case P_L1_MFR:
-                    z = N.r-z;
-                    loss += abs(z);
-                    error = loss;
-                    if(z > 0)
-                        z = 1;
-                    else if(z < 0)
-                        z = -1;
-                    break;
-                case P_LR_MFC:
-                    if(N.r > 0)
-                    {
-                        z = exp(-z);
-                        loss += log(1+z);
-                        error = loss;
-                        z = z/(1+z);
-                    }
-                    else
-                    {
-                        z = exp(z);
-                        loss += log(1+z);
-                        error = loss;
-                        z = -z/(1+z);
-                    }
-                    break;
-                case P_L2_MFC:
-                    if(N.r > 0)
-                    {
-                        error += z > 0? 1: 0;
-                        z = max(0.0f, 1-z);
-                    }
-                    else
-                    {
-                        error += z < 0? 1: 0;
-                        z = min(0.0f, -1-z); // -max(0, 1+z) = min(0, -1-z)
-                    }
-                    loss += z*z;
-                    break;
-                case P_L1_MFC:
-                    if(N.r > 0)
-                    {
-                        loss += max(0.0f, 1-z);
-                        error += z > 0? 1: 0;
-                        z = z > 1? 0: 1; // 1-z < 0? 0: 1 <===> 1-z >=0? 1: 0
-                    }
-                    else
-                    {
-                        loss += max(0.0f, 1+z);
-                        error += z < 0? 1: 0;
-                        z = z < -1? 0: -1; // 1+z < 0? 0: -1 <===> 1+z >=0? -1: 0
-                    }
-                    break;
-                default:
-                    throw invalid_argument("unknown loss function");
-                    break;
-            }
-
-            sg_update(p, q, pG, qG, 0, kALIGN, param.eta,
-                      param.lambda_p1, param.lambda_q1,
-                      param.lambda_p2, param.lambda_q2,
-                      z, rk_slow, param.do_nmf);
-
-            if(slow_only)
-                continue;
-
-            pG++;
-            qG++;
-
-            sg_update(p, q, pG, qG, kALIGN, model.k, param.eta,
-                      param.lambda_p1, param.lambda_q1,
-                      param.lambda_p2, param.lambda_q2,
-                      z, rk_fast, param.do_nmf);
-
-        }
-        blocks[bid].seekg(0);
+        p_blocks[bid]->reset();
         sched.put_job(bid, loss, error);
         if(sched.is_terminated())
             break;
     }
+#endif
 }
 
 class Utility
@@ -1519,6 +1457,14 @@ shared_ptr<mf_model> fpsg(
 
     vector<mf_node*> ptrs = util.grid_problem(*tr, param.nr_bins);
 
+    vector<Block> blocks(param.nr_bins*param.nr_bins);
+    vector<BlockBase*> p_blocks(param.nr_bins*param.nr_bins);
+    for(mf_int i = 0; i < param.nr_bins*param.nr_bins; i++)
+    {
+        blocks[i] = Block(ptrs[i], ptrs[i+1]);
+        p_blocks[i] = &blocks[i];
+    }
+
     mf_int k_aligned = (mf_int)ceil(mf_double(param.k)/kALIGN)*kALIGN;
 
     shared_ptr<mf_model> model(Utility::init_model(tr, param.k, k_aligned), 
@@ -1583,7 +1529,7 @@ shared_ptr<mf_model> fpsg(
 
     vector<thread> threads;
     for(mf_int i = 0; i < param.nr_threads; i++)
-        threads.emplace_back(sg, ref(ptrs), ref(*model), ref(sched), param, 
+        threads.emplace_back(sg, ref(p_blocks), ref(*model), ref(sched), param,
                              ref(slow_only), PG.data(), QG.data());
 
     for(mf_int iter = 0; iter < param.nr_iters; iter++)
@@ -1721,7 +1667,7 @@ shared_ptr<mf_model> fpsg_on_disk(
     mf_long nnz = 0;
     mf_double avg = 0;
     mf_double avg_sq = 0;
-    map<mf_int, fstream> blocks;
+    map<mf_int, fstream> _blocks;
     vector<mf_long> counts(param.nr_bins*param.nr_bins, 0);
 
     for(mf_node N; tr_ >> N.u >> N.v >> N.r;)
@@ -1784,11 +1730,11 @@ shared_ptr<mf_model> fpsg_on_disk(
         string str = dir_name+string("/")+string("block")+to_string(i);
 
         // Create a fstream
-        blocks.emplace(piecewise_construct, std::forward_as_tuple(i),
+        _blocks.emplace(piecewise_construct, std::forward_as_tuple(i),
                 std::forward_as_tuple(str, fstream::in|fstream::out|fstream::trunc|fstream::binary));
 
         // Check if the fstream is opened sucessfully
-        if(!blocks[i].is_open())
+        if(!_blocks[i].is_open())
             cout << str << " error" << endl;
     }
 
@@ -1814,9 +1760,9 @@ shared_ptr<mf_model> fpsg_on_disk(
         if(std_dev != 1)
             N.r /= std_dev;     //scale tr
         mf_int bid = get_block(N.u, N.v);   //grid_into_block
-        blocks[bid].write((char*)&N.u, sizeof(mf_int));
-        blocks[bid].write((char*)&N.v, sizeof(mf_int));
-        blocks[bid].write((char*)&N.r, sizeof(mf_float));
+        _blocks[bid].write((char*)&N.u, sizeof(mf_int));
+        _blocks[bid].write((char*)&N.v, sizeof(mf_int));
+        _blocks[bid].write((char*)&N.r, sizeof(mf_float));
         counts[bid]++;
         u_set.insert(N.u);
         v_set.insert(N.v);
@@ -1828,8 +1774,8 @@ shared_ptr<mf_model> fpsg_on_disk(
 
     for(mf_int i = 0; i < param.nr_bins*param.nr_bins; i++)
     {
-        blocks[i].clear();
-        blocks[i].seekg(0);
+        _blocks[i].clear();
+        _blocks[i].seekg(0);
     }
 
     struct sort_node_by_p
@@ -1854,27 +1800,34 @@ shared_ptr<mf_model> fpsg_on_disk(
         for(mf_long j = 0; j < counts[i]; j++)
         {
             mf_node N;
-            blocks[i].read((char*)&N.u, sizeof(mf_int));
-            blocks[i].read((char*)&N.v, sizeof(mf_int));
-            blocks[i].read((char*)&N.r, sizeof(mf_float));
+            _blocks[i].read((char*)&N.u, sizeof(mf_int));
+            _blocks[i].read((char*)&N.v, sizeof(mf_int));
+            _blocks[i].read((char*)&N.r, sizeof(mf_float));
             nodes[j] = N;
         }
         if(m > n)
             sort(nodes.begin(), nodes.end(), sort_node_by_p());
         else
             sort(nodes.begin(), nodes.end(), sort_node_by_q());
-        blocks[i].clear();
-        blocks[i].seekg(0);
+        _blocks[i].clear();
+        _blocks[i].seekg(0);
         for(mf_long j = 0; j < counts[i]; j++)
         {
-            blocks[i].write((char*)&nodes[j].u, sizeof(mf_int));
-            blocks[i].write((char*)&nodes[j].v, sizeof(mf_int));
-            blocks[i].write((char*)&nodes[j].r, sizeof(mf_float));
+            _blocks[i].write((char*)&nodes[j].u, sizeof(mf_int));
+            _blocks[i].write((char*)&nodes[j].v, sizeof(mf_int));
+            _blocks[i].write((char*)&nodes[j].r, sizeof(mf_float));
         }
-        blocks[i].clear();
-        blocks[i].seekg(0);
+        _blocks[i].close();
     }
 
+    vector<BlockOnDisk> blocks(param.nr_bins*param.nr_bins);
+    vector<BlockBase*> p_blocks(param.nr_bins*param.nr_bins);
+    for(mf_int i = 0; i < param.nr_bins*param.nr_bins; i++)
+    {
+        string str = dir_name+string("/")+string("block")+to_string(i);
+        blocks[i].tie_to(str.c_str());
+        p_blocks[i] = &blocks[i];
+    }
     mf_int k_aligned = (mf_int)ceil(mf_double(param.k)/kALIGN)*kALIGN;
 
     shared_ptr<mf_model> model(Utility::init_model_on_disk(m, n, u_set, v_set, param.k, k_aligned),
@@ -1909,8 +1862,8 @@ shared_ptr<mf_model> fpsg_on_disk(
 
     vector<thread> threads;
     for(mf_int i = 0; i < param.nr_threads; i++)
-        threads.emplace_back(sg_on_disk, ref(blocks), ref(counts), ref(*model),
-                ref(sched), param, ref(slow_only), PG.data(), QG.data());
+        threads.emplace_back(sg, ref(p_blocks), ref(*model), ref(sched), param,
+                             ref(slow_only), PG.data(), QG.data());
 
     for(mf_int iter = 0; iter < param.nr_iters; iter++)
     {
@@ -1977,9 +1930,6 @@ shared_ptr<mf_model> fpsg_on_disk(
 
     for(auto &thread : threads)
         thread.join();
-
-    for(mf_int i = 0; i < param.nr_bins*param.nr_bins; i++)
-        blocks[i].close();
 
 #if defined USESSE || defined USEAVX
     _MM_SET_FLUSH_ZERO_MODE(flush_zero_mode);
