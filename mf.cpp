@@ -9,6 +9,7 @@
 #include <random>
 #include <cstring>
 #include <fstream>
+#include <sstream>
 #include <vector>
 #include <new>
 #include <string>
@@ -501,10 +502,22 @@ public:
         source.clear();
         source.seekg(0);
     }
-    void tie_to(std::string filename){ source.close(); source.open(filename); }
+    void tie_to(std::string filename)
+    {
+        if(source.is_open())
+            source.close();
+        source.open(filename, fstream::in|fstream::out|
+                fstream::trunc|fstream::binary);
+    }
+    void append(mf_node &node)
+    {
+        source.write((char*)&node.u, sizeof(mf_int));
+        source.write((char*)&node.v, sizeof(mf_int));
+        source.write((char*)&node.r, sizeof(mf_float));
+    }
 private:
     mf_node node;
-    std::ifstream source;
+    std::fstream source;
 };
 
 void sg(vector<BlockBase*> &p_blocks, mf_model &model, Scheduler &sched,
@@ -1643,34 +1656,28 @@ shared_ptr<mf_model> fpsg(
 }
 
 shared_ptr<mf_model> fpsg_on_disk(
-    char const *tr_path,
-    char const *va_path,
+    const string tr_path,
+    const string va_path,
     mf_parameter param)
 {
     if(param.nr_blocks != 0)
-    {
-        param.nr_bins = ceil(sqrt(param.nr_blocks));
-    }
+        param.nr_bins = ceil(sqrt(param.nr_blocks)); 
     param.nr_bins = max(param.nr_bins, 2*param.nr_threads);
     Utility util(param.solver, param.nr_threads);
 
-    shared_ptr<mf_problem> va;
-    mf_problem va_ = read_problem(va_path);
-    va = shared_ptr<mf_problem>(Utility::copy_problem(&va_, false));
+    mf_problem va = read_problem(va_path.c_str());
 
-    fstream tr_(tr_path);
-    if(!tr_.is_open())
-        throw runtime_error("cannot open " + string(tr_path));
+    fstream tr_sourse(tr_path.c_str());
+    if(!tr_sourse.is_open())
+        throw runtime_error("cannot open " + tr_path);
 
     mf_int m = 0;
     mf_int n = 0;
     mf_long nnz = 0;
     mf_double avg = 0;
     mf_double avg_sq = 0;
-    map<mf_int, fstream> _blocks;
-    vector<mf_long> counts(param.nr_bins*param.nr_bins, 0);
 
-    for(mf_node N; tr_ >> N.u >> N.v >> N.r;)
+    for(mf_node N; tr_sourse >> N.u >> N.v >> N.r;)
     {
         if(N.u+1 > m)
             m = N.u+1;
@@ -1689,7 +1696,7 @@ shared_ptr<mf_model> fpsg_on_disk(
     if(param.solver == P_L2_MFR || param.solver == P_L1_MFR)
     {
         std_dev = max((mf_float)1e-4, (mf_float)sqrt(avg_sq - avg*avg));
-        util.scale_problem(*va, 1.0/std_dev);
+        util.scale_problem(va, 1.0/std_dev);
         switch(param.solver)
         {
             case P_L2_MFR:
@@ -1708,34 +1715,37 @@ shared_ptr<mf_model> fpsg_on_disk(
     vector<mf_int> p_map = Utility::gen_random_map(m);
     vector<mf_int> q_map = Utility::gen_random_map(n);
 
-    util.shuffle_problem(*va, p_map, q_map);
-    char dir_name[1024];
-    char tmp_path[1024];
-    strcpy(tmp_path, tr_path);
-    char *p = strrchr(tmp_path, '/');
-    if(p == NULL)
-        p = tmp_path;
+    util.shuffle_problem(va, p_map, q_map);
+
+    size_t p = tr_path.rfind('/');
+    string dirname;
+    if(p != string::npos)
+        dirname = tr_path.substr(p+1);
     else
-        ++p;
-    sprintf(dir_name, "%s.blocks.%d", p, param.nr_bins*param.nr_bins);
-    
-    if(mkdir(dir_name, 0755) != 0)
+        dirname = tr_path;
+
+    auto num_to_str = [] (mf_int num)
     {
-        fprintf(stderr,"Cannot make dir %s; remove or rename the directoy if it exists\n", dir_name);
+        stringstream buf;
+        buf << num;
+        return buf.str();
+    };
+
+    dirname = dirname + string(".blocks.") + num_to_str(param.nr_bins*param.nr_bins);
+    
+    if(mkdir(dirname.c_str(), 0755) != 0)
+    {
+        cout << "Cannot make dir " << dirname << ", remove or rename the directory if it exists" << endl;
         exit(1);
     }
 
+    vector<BlockOnDisk> blocks(param.nr_bins*param.nr_bins);
+    vector<BlockBase*> p_blocks(param.nr_bins*param.nr_bins);
     for(mf_int i = 0; i < param.nr_bins*param.nr_bins; i++)
     {
-        string str = dir_name+string("/")+string("block")+to_string(i);
-
-        // Create a fstream
-        _blocks.emplace(piecewise_construct, std::forward_as_tuple(i),
-                std::forward_as_tuple(str, fstream::in|fstream::out|fstream::trunc|fstream::binary));
-
-        // Check if the fstream is opened sucessfully
-        if(!_blocks[i].is_open())
-            cout << str << " error" << endl;
+        string str = dirname+string("/block")+num_to_str(i);
+        blocks[i].tie_to(str.c_str());
+        p_blocks[i] = &blocks[i];
     }
 
     mf_int seg_p = (mf_int)ceil((double)m/param.nr_bins);
@@ -1746,37 +1756,28 @@ shared_ptr<mf_model> fpsg_on_disk(
         return (u/seg_p)*param.nr_bins+v/seg_q;
     };
 
-    tr_.clear();
-    tr_.seekg(0);
+    tr_sourse.clear();
+    tr_sourse.seekg(0);
 
     vector<mf_int> omega_p(m, 0), omega_q(n, 0);
     set<mf_int> u_set;
     set<mf_int> v_set;
 
-    for(mf_node N; tr_ >> N.u >> N.v >> N.r;)
+    for(mf_node N; tr_sourse >> N.u >> N.v >> N.r;)
     {
         N.u = p_map[N.u];   //shuffle tr
         N.v = q_map[N.v];   //shuffle tr
         if(std_dev != 1)
             N.r /= std_dev;     //scale tr
         mf_int bid = get_block(N.u, N.v);   //grid_into_block
-        _blocks[bid].write((char*)&N.u, sizeof(mf_int));
-        _blocks[bid].write((char*)&N.v, sizeof(mf_int));
-        _blocks[bid].write((char*)&N.r, sizeof(mf_float));
-        counts[bid]++;
+        blocks[bid].append(N);
         u_set.insert(N.u);
         v_set.insert(N.v);
         omega_p[N.u]++;
         omega_q[N.v]++;
     }
 
-    tr_.close();
-
-    for(mf_int i = 0; i < param.nr_bins*param.nr_bins; i++)
-    {
-        _blocks[i].clear();
-        _blocks[i].seekg(0);
-    }
+    tr_sourse.close();
 
     struct sort_node_by_p
     {
@@ -1796,38 +1797,26 @@ shared_ptr<mf_model> fpsg_on_disk(
 
     for(mf_int i = 0; i < param.nr_bins*param.nr_bins; i++)
     {
-        vector<mf_node> nodes(counts[i]);
-        for(mf_long j = 0; j < counts[i]; j++)
+        blocks[i].reset();
+        //vector<mf_node> nodes(counts[i]); //should we keep counts for this initialization?
+        vector<mf_node> nodes;
+        while(blocks[i].move_next())
         {
-            mf_node N;
-            _blocks[i].read((char*)&N.u, sizeof(mf_int));
-            _blocks[i].read((char*)&N.v, sizeof(mf_int));
-            _blocks[i].read((char*)&N.r, sizeof(mf_float));
-            nodes[j] = N;
+            mf_node *N = blocks[i].get_current();
+            nodes.push_back(*N);
         }
         if(m > n)
             sort(nodes.begin(), nodes.end(), sort_node_by_p());
         else
             sort(nodes.begin(), nodes.end(), sort_node_by_q());
-        _blocks[i].clear();
-        _blocks[i].seekg(0);
-        for(mf_long j = 0; j < counts[i]; j++)
-        {
-            _blocks[i].write((char*)&nodes[j].u, sizeof(mf_int));
-            _blocks[i].write((char*)&nodes[j].v, sizeof(mf_int));
-            _blocks[i].write((char*)&nodes[j].r, sizeof(mf_float));
-        }
-        _blocks[i].close();
+
+        blocks[i].reset();
+
+        for(int j = 0; j < nodes.size(); j++)
+            blocks[i].append(nodes[j]);
+        blocks[i].reset();
     }
 
-    vector<BlockOnDisk> blocks(param.nr_bins*param.nr_bins);
-    vector<BlockBase*> p_blocks(param.nr_bins*param.nr_bins);
-    for(mf_int i = 0; i < param.nr_bins*param.nr_bins; i++)
-    {
-        string str = dir_name+string("/")+string("block")+to_string(i);
-        blocks[i].tie_to(str.c_str());
-        p_blocks[i] = &blocks[i];
-    }
     mf_int k_aligned = (mf_int)ceil(mf_double(param.k)/kALIGN)*kALIGN;
 
     shared_ptr<mf_model> model(Utility::init_model_on_disk(m, n, u_set, v_set, param.k, k_aligned),
@@ -1850,7 +1839,7 @@ shared_ptr<mf_model> fpsg_on_disk(
         cout << "iter";
         cout.width(13);
         cout << "tr_"+util.get_error_legend();
-        if(va->nnz != 0)
+        if(va.nnz != 0)
         {
             cout.width(13);
             cout << "va_"+util.get_error_legend();
@@ -1900,9 +1889,9 @@ shared_ptr<mf_model> fpsg_on_disk(
             cout << iter;
             cout.width(13);
             cout << fixed << setprecision(4) << tr_error;
-            if(va->nnz != 0)
+            if(va.nnz != 0)
             {
-                mf_double va_error = util.calc_error(va->R, va->nnz, *model)/va->nnz;
+                mf_double va_error = util.calc_error(va.R, va.nnz, *model)/va.nnz;
                 switch(param.solver)
                 {
                     case P_L2_MFR:
@@ -1974,7 +1963,7 @@ mf_model* mf_train_with_validation_on_disk(
     char const *va_path,
     mf_parameter param)
 {
-    shared_ptr<mf_model> model = fpsg_on_disk(tr_path, va_path, param);
+    shared_ptr<mf_model> model = fpsg_on_disk(string(tr_path), string(va_path), param);
 
     mf_model *model_ret = new mf_model;
 
