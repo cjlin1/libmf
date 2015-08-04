@@ -183,6 +183,7 @@ Option parse_option(int argc, char **argv)
             option.param.nr_blocks = atoi(argv[i]);
             if(option.param.nr_blocks <= 1)
                 throw invalid_argument("number of blocks should be larger than 1");
+            option.param.nr_bins = ceil(sqrt(option.param.nr_blocks));
         }
         else if(args[i].compare("--nmf") == 0)
         {

@@ -902,6 +902,22 @@ void sg(vector<BlockBase*> &p_blocks, mf_model &model, Scheduler &sched,
 #endif
 }
 
+struct sort_node_by_p
+{
+    bool operator() (mf_node const &lhs, mf_node const &rhs)
+    {
+        return tie(lhs.u, lhs.v) < tie(rhs.u, rhs.v);
+    }
+};
+
+struct sort_node_by_q
+{
+    bool operator() (mf_node const &lhs, mf_node const &rhs)
+    {
+        return tie(lhs.v, lhs.u) < tie(rhs.v, rhs.u);
+    }
+};
+
 class Utility
 {
 public:
@@ -1186,23 +1202,6 @@ vector<mf_node*> Utility::grid_problem(mf_problem &prob, mf_int nr_bins)
             pivots[curr_block]++;
         }
     }
-
-    struct sort_node_by_p
-    {
-        bool operator() (mf_node const &lhs, mf_node const &rhs)
-        {
-            return tie(lhs.u, lhs.v) < tie(rhs.u, rhs.v);
-        }
-    };
-
-    struct sort_node_by_q
-    {
-        bool operator() (mf_node const &lhs, mf_node const &rhs)
-        {
-            return tie(lhs.v, lhs.u) < tie(rhs.v, rhs.u);
-        }
-    };
-
 #if defined USEOMP
 #pragma omp parallel for num_threads(nr_threads) schedule(dynamic)
 #endif
@@ -1660,14 +1659,12 @@ shared_ptr<mf_model> fpsg_on_disk(
     const string va_path,
     mf_parameter param)
 {
-    if(param.nr_blocks != 0)
-        param.nr_bins = ceil(sqrt(param.nr_blocks)); 
     param.nr_bins = max(param.nr_bins, 2*param.nr_threads);
     Utility util(param.solver, param.nr_threads);
 
     mf_problem va = read_problem(va_path.c_str());
 
-    fstream tr_sourse(tr_path.c_str());
+    ifstream tr_sourse(tr_path.c_str());
     if(!tr_sourse.is_open())
         throw runtime_error("cannot open " + tr_path);
 
@@ -1687,6 +1684,8 @@ shared_ptr<mf_model> fpsg_on_disk(
         avg += N.r;
         avg_sq += N.r*N.r;
     }
+    tr_sourse.clear();
+    tr_sourse.seekg(0);
 
     avg /= nnz;
     avg_sq/=nnz;
@@ -1731,13 +1730,10 @@ shared_ptr<mf_model> fpsg_on_disk(
         return buf.str();
     };
 
-    dirname = dirname + string(".blocks.") + num_to_str(param.nr_bins*param.nr_bins);
+    dirname += string(".blocks.") + num_to_str(param.nr_bins*param.nr_bins);
     
     if(mkdir(dirname.c_str(), 0755) != 0)
-    {
-        cout << "Cannot make dir " << dirname << ", remove or rename the directory if it exists" << endl;
-        exit(1);
-    }
+        throw runtime_error("cannot create directory " + dirname);
 
     vector<BlockOnDisk> blocks(param.nr_bins*param.nr_bins);
     vector<BlockBase*> p_blocks(param.nr_bins*param.nr_bins);
@@ -1756,61 +1752,40 @@ shared_ptr<mf_model> fpsg_on_disk(
         return (u/seg_p)*param.nr_bins+v/seg_q;
     };
 
-    tr_sourse.clear();
-    tr_sourse.seekg(0);
-
     vector<mf_int> omega_p(m, 0), omega_q(n, 0);
     set<mf_int> u_set;
     set<mf_int> v_set;
 
     for(mf_node N; tr_sourse >> N.u >> N.v >> N.r;)
     {
-        N.u = p_map[N.u];   //shuffle tr
-        N.v = q_map[N.v];   //shuffle tr
-        if(std_dev != 1)
-            N.r /= std_dev;     //scale tr
-        mf_int bid = get_block(N.u, N.v);   //grid_into_block
+        N.u = p_map[N.u];
+        N.v = q_map[N.v];
+        N.r /= std_dev;
+        mf_int bid = get_block(N.u, N.v);
         blocks[bid].append(N);
         u_set.insert(N.u);
         v_set.insert(N.v);
         omega_p[N.u]++;
         omega_q[N.v]++;
     }
-
+    for(mf_int i = 0; i < param.nr_bins*param.nr_bins; i++)
+        blocks[i].reset();
     tr_sourse.close();
-
-    struct sort_node_by_p
-    {
-        bool operator() (mf_node const &lhs, mf_node const &rhs)
-        {
-            return tie(lhs.u, lhs.v) < tie(rhs.u, rhs.v);
-        }
-    };
-
-    struct sort_node_by_q
-    {
-        bool operator() (mf_node const &lhs, mf_node const &rhs)
-        {
-            return tie(lhs.v, lhs.u) < tie(rhs.v, rhs.u);
-        }
-    };
-
+    
     for(mf_int i = 0; i < param.nr_bins*param.nr_bins; i++)
     {
-        blocks[i].reset();
-        //vector<mf_node> nodes(counts[i]); //should we keep counts for this initialization?
         vector<mf_node> nodes;
         while(blocks[i].move_next())
         {
             mf_node *N = blocks[i].get_current();
             nodes.push_back(*N);
         }
+        blocks[i].reset();
+
         if(m > n)
             sort(nodes.begin(), nodes.end(), sort_node_by_p());
         else
             sort(nodes.begin(), nodes.end(), sort_node_by_q());
-
-        blocks[i].reset();
 
         for(int j = 0; j < nodes.size(); j++)
             blocks[i].append(nodes[j]);
@@ -1983,6 +1958,11 @@ mf_model* mf_train_with_validation_on_disk(
 mf_model* mf_train(mf_problem const *prob, mf_parameter param)
 {
     return mf_train_with_validation(prob, nullptr, param);
+}
+
+mf_model* mf_train_on_disk(char const *tr_path, mf_parameter param)
+{
+    return mf_train_with_validation_on_disk(tr_path, nullptr, param);
 }
 
 mf_float mf_cross_validation(
