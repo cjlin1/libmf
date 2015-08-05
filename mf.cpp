@@ -922,9 +922,17 @@ class Utility
 {
 public:
     Utility (mf_int s, mf_int n);
-    void shuffle_problem(mf_problem &prob, vector<mf_int> &p_map, vector<mf_int> &q_map);
+
+    void collect_info(mf_problem &prob, mf_float &avg, mf_float &std_dev);
+    void collect_info(string data_path, mf_problem &prob,
+                               mf_float &avg, mf_float &std_dev);
+    void shuffle_problem(mf_problem &prob, vector<mf_int> &p_map,
+                         vector<mf_int> &q_map);
     vector<mf_node*> grid_problem(mf_problem &prob, mf_int nr_bins);
-    mf_float calc_std_dev(mf_problem &prob);
+    void grid_problem(mf_int m, mf_int n, mf_int nr_bins, mf_float scale,
+                      string data_path, vector<BlockOnDisk> &blocks,
+                      vector<mf_int> &p_map, vector<mf_int> &q_map,
+                      vector<mf_int> &omega_p, vector<mf_int> &omega_q);
     void scale_problem(mf_problem &prob, mf_float scale);
     mf_double calc_reg1(mf_model &model, mf_float lambda_p, mf_float lambda_q,
             vector<mf_int> &omega_p, vector<mf_int> &omega_q);
@@ -934,11 +942,11 @@ public:
     mf_double calc_error(mf_node const *R, mf_long const size, mf_model const &model);
     void scale_model(mf_model &model, mf_float scale);
 
+    static vector<string> get_block_paths(string data_path, mf_int nr_bins);
     static mf_problem* copy_problem(mf_problem const *prob, bool copy_data);
     static vector<mf_int> gen_random_map(mf_int size);
     static mf_float* malloc_aligned_float(mf_long size);
-    static mf_model* init_model(shared_ptr<mf_problem> prob, mf_int k_real, mf_int k_aligned);
-    static mf_model* init_model_on_disk(mf_int m, mf_int n, set<mf_int> u_set, set<mf_int> v_set, mf_int k_real, mf_int k_aligned);
+    static mf_model* init_model(mf_int m, mf_int n, mf_int k, vector<mf_int> &omega_p, vector<mf_int> &omega_q);
     static mf_float inner_product(mf_float *p, mf_float *q, mf_int k);
     static vector<mf_int> gen_inv_map(vector<mf_int> &map);
     static void shrink_model(mf_model &model, mf_int k_new);
@@ -952,27 +960,6 @@ private:
 Utility::Utility(mf_int s, mf_int n):
     solver(s), nr_threads(n)
 { }
-
-mf_float Utility::calc_std_dev(mf_problem &prob)
-{
-    mf_double avg = 0;
-#if defined USEOMP
-#pragma omp parallel for num_threads(nr_threads) schedule(static) reduction(+: avg)
-#endif
-    for(mf_long i = 0; i < prob.nnz; i++)
-        avg += prob.R[i].r;
-    avg /= prob.nnz;
-
-    mf_double std_dev = 0;
-#if defined USEOMP
-#pragma omp parallel for num_threads(nr_threads) schedule(static) reduction(+: std_dev)
-#endif
-    for(mf_long i = 0; i < prob.nnz; i++)
-        std_dev += (prob.R[i].r-avg)*(prob.R[i].r-avg);
-    std_dev = sqrt(std_dev/prob.nnz);
-
-    return (mf_float)std_dev;
-}
 
 void Utility::scale_problem(mf_problem &prob, mf_float scale)
 {
@@ -1167,7 +1154,7 @@ vector<mf_node*> Utility::grid_problem(mf_problem &prob, mf_int nr_bins)
     mf_int seg_p = (mf_int)ceil((double)prob.m/nr_bins);
     mf_int seg_q = (mf_int)ceil((double)prob.n/nr_bins);
 
-    auto get_block = [=] (mf_int u, mf_int v)
+    auto get_block_id = [=] (mf_int u, mf_int v)
     {
         return (u/seg_p)*nr_bins+v/seg_q;
     };
@@ -1175,7 +1162,7 @@ vector<mf_node*> Utility::grid_problem(mf_problem &prob, mf_int nr_bins)
     for(mf_long i = 0; i < prob.nnz; i++)
     {
         mf_node &N = prob.R[i];
-        mf_int block = get_block(N.u, N.v);
+        mf_int block = get_block_id(N.u, N.v);
         counts[block]++;
     }
 
@@ -1190,7 +1177,7 @@ vector<mf_node*> Utility::grid_problem(mf_problem &prob, mf_int nr_bins)
     {
         for(mf_node* pivot = pivots[block]; pivot != ptrs[block+1];)
         {
-            mf_int curr_block = get_block(pivot->u, pivot->v);
+            mf_int curr_block = get_block_id(pivot->u, pivot->v);
             if(curr_block == block)
             {
                 pivot++;
@@ -1216,6 +1203,67 @@ vector<mf_node*> Utility::grid_problem(mf_problem &prob, mf_int nr_bins)
     return ptrs;
 }
 
+void Utility::grid_problem(
+        mf_int m,
+        mf_int n,
+        mf_int nr_bins,
+        mf_float scale,
+        string data_path,
+        vector<BlockOnDisk> &blocks,
+        vector<mf_int> &p_map,
+        vector<mf_int> &q_map,
+        vector<mf_int> &omega_p,
+        vector<mf_int> &omega_q)
+{
+    vector<string> block_paths = get_block_paths(data_path, nr_bins);
+    for(mf_int i = 0; i < nr_bins*nr_bins; i++)
+        blocks[i].tie_to(block_paths[i].c_str());
+
+    mf_int seg_p = (mf_int)ceil((double)m/nr_bins);
+    mf_int seg_q = (mf_int)ceil((double)n/nr_bins);
+
+    auto get_block_id = [=] (mf_int u, mf_int v)
+    {
+        return (u/seg_p)*nr_bins+v/seg_q;
+    };
+    
+    ifstream source(data_path);
+    for(mf_node N; source >> N.u >> N.v >> N.r;)
+    {
+        N.u = p_map[N.u];
+        N.v = q_map[N.v];
+        N.r /= scale;
+
+        mf_int bid = get_block_id(N.u, N.v);
+        blocks[bid].append(N);
+        omega_p[N.u]++;
+        omega_q[N.v]++;
+    }
+    for(mf_int i = 0; i < nr_bins*nr_bins; i++)
+        blocks[i].reset();
+    source.close();
+    
+    for(mf_int i = 0; i < nr_bins*nr_bins; i++)
+    {
+        vector<mf_node> nodes;
+        while(blocks[i].move_next())
+        {
+            mf_node *N = blocks[i].get_current();
+            nodes.push_back(*N);
+        }
+        blocks[i].reset();
+
+        if(m > n)
+            sort(nodes.begin(), nodes.end(), sort_node_by_p());
+        else
+            sort(nodes.begin(), nodes.end(), sort_node_by_q());
+
+        for(int j = 0; j < nodes.size(); j++)
+            blocks[i].append(nodes[j]);
+        blocks[i].reset();
+    }
+}
+
 mf_float* Utility::malloc_aligned_float(mf_long size)
 {
     void *ptr;
@@ -1232,58 +1280,11 @@ mf_float* Utility::malloc_aligned_float(mf_long size)
     return (mf_float*)ptr;
 }
 
-mf_model* Utility::init_model(shared_ptr<mf_problem> prob, mf_int k_real, mf_int k_aligned)
+mf_model* Utility::init_model(mf_int m, mf_int n, mf_int k, vector<mf_int> &omega_p, vector<mf_int> &omega_q)
 {
-    mf_model *model = new mf_model;
-    model->m = prob->m;
-    model->n = prob->n;
-    model->k = k_aligned;
-    model->P = nullptr;
-    model->Q = nullptr;
+    mf_int k_real = k;
+    mf_int k_aligned = (mf_int)ceil(mf_double(k)/kALIGN)*kALIGN;
 
-    mf_float scale = sqrt(1.0/k_real);
-    default_random_engine generator;
-    uniform_real_distribution<mf_float> distribution(0.0, 1.0);
-
-    try
-    {
-        model->P = Utility::malloc_aligned_float((mf_long)model->m*model->k);
-        model->Q = Utility::malloc_aligned_float((mf_long)model->n*model->k);
-    }
-    catch(bad_alloc const &e)
-    {
-        mf_destroy_model(&model);
-        throw; 
-    }
-
-    set<mf_int> u_set;
-    set<mf_int> v_set;
-
-    for (mf_int i=0; i<prob->nnz; i++)
-    {
-        u_set.insert(prob->R[i].u);
-        v_set.insert(prob->R[i].v);
-    }
-
-    auto init1 = [&](mf_float *start_ptr, mf_int count, set<mf_int> nz_set)
-    {
-        memset(start_ptr, 0, sizeof(mf_float)*count*model->k);
-        for (auto it = nz_set.begin(); it != nz_set.end(); it++)
-        {
-            mf_float * ptr = start_ptr + (mf_long)(*it)*model->k;
-            for(mf_long d = 0; d < k_real; d++, ptr++)
-                *ptr = (mf_float)(distribution(generator)*scale);
-        }
-    };
-
-    init1(model->P, prob->m, u_set);
-    init1(model->Q, prob->n, v_set);
-
-    return model;
-}
-
-mf_model* Utility::init_model_on_disk(mf_int m, mf_int n, set<mf_int> u_set, set<mf_int> v_set, mf_int k_real, mf_int k_aligned)
-{
     mf_model *model = new mf_model;
 
     model->m = m;
@@ -1307,19 +1308,22 @@ mf_model* Utility::init_model_on_disk(mf_int m, mf_int n, set<mf_int> u_set, set
         throw;
     }
 
-    auto init1 = [&](mf_float *start_ptr, mf_int count, set<mf_int> nz_set)
+    auto init1 = [&](mf_float *start_ptr, mf_long size, vector<mf_int> counts)
     {
-        memset(start_ptr, 0, sizeof(mf_float)*count*model->k);
-        for (auto it = nz_set.begin(); it != nz_set.end(); it++)
+        memset(start_ptr, 0, sizeof(mf_float)*size*model->k);
+        for(mf_long i = 0; i < size; i++)
         {
-            mf_float * ptr = start_ptr + (mf_long)(*it)*model->k;
+            if(counts[i] <= 0)
+                continue;
+            mf_float * ptr = start_ptr + i*model->k;
             for(mf_long d = 0; d < k_real; d++, ptr++)
                 *ptr = (mf_float)(distribution(generator)*scale);
+
         }
     };
 
-    init1(model->P, m, u_set);
-    init1(model->Q, n, v_set);
+    init1(model->P, m, omega_p);
+    init1(model->Q, n, omega_q);
 
     return model;
 }
@@ -1391,6 +1395,33 @@ void Utility::shrink_model(mf_model &model, mf_int k_new)
     shrink1(model.Q, model.n);
 }
 
+vector<string> Utility::get_block_paths(string data_path, mf_int nr_bins)
+{
+    string dirname;
+    if(data_path.rfind('/') != string::npos)
+        dirname = data_path.substr(data_path.rfind('/')+1);
+    else
+        dirname = data_path;
+
+    auto num_to_str = [] (mf_int num)
+    {
+        stringstream buf;
+        buf << num;
+        return buf.str();
+    };
+
+    dirname += string(".blocks.") + num_to_str(nr_bins*nr_bins);
+    
+    if(mkdir(dirname.c_str(), 0755) != 0)
+        throw runtime_error("cannot create directory " + dirname);
+
+    vector<string> block_paths(nr_bins*nr_bins);
+    for(mf_int i = 0; i < nr_bins*nr_bins; i++)
+        block_paths[i] = dirname+string("/block")+num_to_str(i);
+
+    return block_paths;
+}
+
 mf_problem* Utility::copy_problem(mf_problem const *prob, bool copy_data)
 {
     mf_problem *new_prob = new mf_problem;
@@ -1430,6 +1461,143 @@ mf_problem* Utility::copy_problem(mf_problem const *prob, bool copy_data)
     return new_prob;
 }
 
+void fpsg_core(
+        Utility &util,
+        Scheduler &sched,
+        mf_problem *tr,
+        mf_problem *va,
+        mf_parameter &param,
+        mf_float scale,
+        vector<BlockBase*> &block_ptrs,
+        vector<mf_int> &p_map,
+        vector<mf_int> &q_map,
+        vector<mf_int> &inv_p_map,
+        vector<mf_int> &inv_q_map,
+        vector<mf_int> &omega_p,
+        vector<mf_int> &omega_q,
+        shared_ptr<mf_model> &model)
+{
+    if(param.solver == P_L2_MFR || param.solver == P_L1_MFR)
+    {
+        switch(param.solver)
+        {
+            case P_L2_MFR:
+                param.lambda_p2 /= scale;
+                param.lambda_q2 /= scale;
+                param.lambda_p1 /= pow(scale, 1.5);
+                param.lambda_q1 /= pow(scale, 1.5);
+                break;
+            case P_L1_MFR:
+                param.lambda_p1 /= sqrt(scale);
+                param.lambda_q1 /= sqrt(scale);
+                break;
+        }
+    }
+
+#if defined USESSE || defined USEAVX
+    auto flush_zero_mode = _MM_GET_FLUSH_ZERO_MODE();
+    _MM_SET_FLUSH_ZERO_MODE(_MM_FLUSH_ZERO_ON);
+#endif
+
+    if(!param.quiet)
+    {
+        cout.width(4);
+        cout << "iter";
+        cout.width(13);
+        cout << "tr_"+util.get_error_legend();
+        if(va->nnz != 0)
+        {
+            cout.width(13);
+            cout << "va_"+util.get_error_legend();
+        }
+        cout.width(13);
+        cout << "obj";
+        cout << "\n";
+    }
+
+    bool slow_only = param.lambda_p1 == 0 && param.lambda_q1 == 0? true: false;
+    vector<mf_float> PG(model->m*2, 1), QG(model->n*2, 1);
+
+    vector<thread> threads;
+    for(mf_int i = 0; i < param.nr_threads; i++)
+        threads.emplace_back(sg, ref(block_ptrs), ref(*model), ref(sched), param,
+                             ref(slow_only), PG.data(), QG.data());
+
+    for(mf_int iter = 0; iter < param.nr_iters; iter++)
+    {
+        sched.wait_for_jobs_done();
+
+        if(!param.quiet)
+        {
+            mf_double reg = 0;
+            mf_double reg1 = util.calc_reg1(*model, param.lambda_p1,
+                             param.lambda_q1, omega_p, omega_q);
+            mf_double reg2 = util.calc_reg2(*model, param.lambda_p2,
+                             param.lambda_q2, omega_p, omega_q);
+            mf_double tr_loss = sched.get_loss();
+            mf_double tr_error = sched.get_error()/tr->nnz;
+
+            switch(param.solver)
+            {
+                case P_L2_MFR:
+                    reg = reg1*sqrt(scale)+reg2*scale;
+                    tr_loss *= scale*scale;
+                    tr_error = sqrt(tr_error*scale*scale);
+                    break;
+                case P_L1_MFR:
+                    reg = reg1*sqrt(scale)+reg2*scale;
+                    tr_loss *= scale;
+                    tr_error *= scale;
+                    break;
+                default:
+                    reg = reg1+reg2;
+                    break;
+            }
+
+            cout.width(4);
+            cout << iter;
+            cout.width(13);
+            cout << fixed << setprecision(4) << tr_error;
+            if(va->nnz != 0)
+            {
+                mf_double va_error = util.calc_error(va->R, va->nnz, *model)/va->nnz;
+                switch(param.solver)
+                {
+                    case P_L2_MFR:
+                        va_error = sqrt(va_error*scale*scale);
+                        break;
+                    case P_L1_MFR:
+                        va_error *= scale;
+                        break;
+                }
+
+                cout.width(13);
+                cout << fixed << setprecision(4) << va_error;
+            }
+            cout.width(13);
+            cout << fixed << setprecision(4) << scientific << reg+tr_loss;
+            cout << "\n" << flush;
+        }
+
+        if(iter == 0)
+            slow_only = false;
+
+        sched.resume();
+    }
+    sched.terminate();
+
+    for(auto &thread : threads)
+        thread.join();
+
+#if defined USESSE || defined USEAVX
+    _MM_SET_FLUSH_ZERO_MODE(flush_zero_mode);
+#endif
+
+    util.scale_model(*model, sqrt(scale));
+    Utility::shrink_model(*model, param.k);
+    Utility::shuffle_model(*model, inv_p_map, inv_q_map);
+}
+
 shared_ptr<mf_model> fpsg(
     mf_problem const *tr_, 
     mf_problem const *va_, 
@@ -1463,48 +1631,34 @@ shared_ptr<mf_model> fpsg(
 
     vector<mf_int> p_map = Utility::gen_random_map(tr->m);
     vector<mf_int> q_map = Utility::gen_random_map(tr->n);
+    vector<mf_int> inv_p_map = Utility::gen_inv_map(p_map);
+    vector<mf_int> inv_q_map = Utility::gen_inv_map(q_map);
 
     util.shuffle_problem(*tr, p_map, q_map);
     util.shuffle_problem(*va, p_map, q_map);
 
+    mf_float avg = 0;
+    mf_float std_dev = 0;
+
+    util.collect_info(*tr, avg, std_dev);
+
+    mf_float scale = 1;
+
+    if(param.solver == P_L2_MFR || param.solver == P_L1_MFR)
+        scale = max((mf_float)1e-4, std_dev);
+
+    util.scale_problem(*tr, 1.0/scale);
+    util.scale_problem(*va, 1.0/scale);
+
     vector<mf_node*> ptrs = util.grid_problem(*tr, param.nr_bins);
 
     vector<Block> blocks(param.nr_bins*param.nr_bins);
-    vector<BlockBase*> p_blocks(param.nr_bins*param.nr_bins);
+    vector<BlockBase*> block_ptrs(param.nr_bins*param.nr_bins);
     for(mf_int i = 0; i < param.nr_bins*param.nr_bins; i++)
     {
         blocks[i] = Block(ptrs[i], ptrs[i+1]);
-        p_blocks[i] = &blocks[i];
+        block_ptrs[i] = &blocks[i];
     }
-
-    mf_int k_aligned = (mf_int)ceil(mf_double(param.k)/kALIGN)*kALIGN;
-
-    shared_ptr<mf_model> model(Utility::init_model(tr, param.k, k_aligned), 
-                               [] (mf_model *ptr) { mf_destroy_model(&ptr); });
-
-    mf_float std_dev = 1;
-
-    if(param.solver == P_L2_MFR || param.solver == P_L1_MFR)
-    {
-        std_dev = max((mf_float)1e-4, util.calc_std_dev(*tr));
-        util.scale_problem(*tr, 1.0/std_dev);
-        util.scale_problem(*va, 1.0/std_dev);
-        switch(param.solver)
-        {
-            case P_L2_MFR:
-                param.lambda_p2 /= std_dev;
-                param.lambda_q2 /= std_dev;
-                param.lambda_p1 /= pow(std_dev, 1.5);
-                param.lambda_q1 /= pow(std_dev, 1.5);
-                break;
-            case P_L1_MFR:
-                param.lambda_p1 /= sqrt(std_dev);
-                param.lambda_q1 /= sqrt(std_dev);
-                break;
-        }
-    }
-
-    Scheduler sched(param.nr_bins, param.nr_threads, cv_blocks);
 
     vector<mf_int> omega_p(tr->m, 0), omega_q(tr->n, 0);
     for(mf_long i = 0; i < tr->nnz; i++)
@@ -1514,105 +1668,13 @@ shared_ptr<mf_model> fpsg(
         omega_q[N.v]++;
     }
 
-    bool slow_only = param.lambda_p1 == 0 && param.lambda_q1 == 0? true: false;
+    shared_ptr<mf_model> model(Utility::init_model(tr->m, tr->n, param.k, omega_p, omega_q), 
+                               [] (mf_model *ptr) { mf_destroy_model(&ptr); });
 
-    vector<mf_float> PG(model->m*2, 1), QG(model->n*2, 1);
+    Scheduler sched(param.nr_bins, param.nr_threads, cv_blocks);
 
-#if defined USESSE || defined USEAVX
-    auto flush_zero_mode = _MM_GET_FLUSH_ZERO_MODE();
-    _MM_SET_FLUSH_ZERO_MODE(_MM_FLUSH_ZERO_ON);
-#endif
-    
-    if(!param.quiet)
-    {
-        cout.width(4);
-        cout << "iter";
-        cout.width(13);
-        cout << "tr_"+util.get_error_legend();
-        if(va->nnz != 0)
-        {
-            cout.width(13);
-            cout << "va_"+util.get_error_legend();
-        }
-        cout.width(13);
-        cout << "obj";
-        cout << "\n";
-    }
-
-    vector<thread> threads;
-    for(mf_int i = 0; i < param.nr_threads; i++)
-        threads.emplace_back(sg, ref(p_blocks), ref(*model), ref(sched), param,
-                             ref(slow_only), PG.data(), QG.data());
-
-    for(mf_int iter = 0; iter < param.nr_iters; iter++)
-    {
-        sched.wait_for_jobs_done();
-
-        if(!param.quiet)
-        {
-            mf_double reg = 0;
-            mf_double reg1 = util.calc_reg1(*model, param.lambda_p1,
-                             param.lambda_q1, omega_p, omega_q);
-            mf_double reg2 = util.calc_reg2(*model, param.lambda_p2,
-                             param.lambda_q2, omega_p, omega_q);
-            mf_double tr_loss = sched.get_loss();
-            mf_double tr_error = sched.get_error()/tr->nnz;
-
-            switch(param.solver)
-            {
-                case P_L2_MFR:
-                    reg = reg1*sqrt(std_dev)+reg2*std_dev;
-                    tr_loss *= std_dev*std_dev;
-                    tr_error = sqrt(tr_error*std_dev*std_dev);
-                    break;
-                case P_L1_MFR:
-                    reg = reg1*sqrt(std_dev)+reg2*std_dev;
-                    tr_loss *= std_dev;
-                    tr_error *= std_dev;
-                    break;
-                default:
-                    reg = reg1+reg2;
-                    break;
-            }
-            
-            cout.width(4);
-            cout << iter;
-            cout.width(13);
-            cout << fixed << setprecision(4) << tr_error;
-            if(va->nnz != 0)
-            {
-                mf_double va_error = util.calc_error(va->R, va->nnz, *model)/va->nnz;
-                switch(param.solver)
-                {
-                    case P_L2_MFR:
-                        va_error = sqrt(va_error*std_dev*std_dev);
-                        break;
-                    case P_L1_MFR:
-                        va_error *= std_dev;
-                        break;
-                }
-
-                cout.width(13);
-                cout << fixed << setprecision(4) << va_error;
-            }
-            cout.width(13);
-            cout << fixed << setprecision(4) << scientific << reg+tr_loss;
-            cout << "\n" << flush;
-        }
-
-        if(iter == 0) 
-            slow_only = false;
-
-        sched.resume();
-    }
-    sched.terminate();
-    
-    for(auto &thread : threads)
-        thread.join();
-
-#if defined USESSE || defined USEAVX
-    _MM_SET_FLUSH_ZERO_MODE(flush_zero_mode);
-#endif
+    fpsg_core(util, sched, tr.get(), va.get(), param, scale, block_ptrs,
+            p_map, q_map, inv_p_map, inv_q_map, omega_p, omega_q, model);
 
     if(cv_error != nullptr)
     {
@@ -1628,31 +1690,68 @@ shared_ptr<mf_model> fpsg(
         switch(param.solver)
         {
             case P_L2_MFR:
-                *cv_error = sqrt(*cv_error*std_dev*std_dev);
+                *cv_error = sqrt(*cv_error*scale*scale);
                 break;
             case P_L1_MFR:
-                *cv_error *= std_dev;
+                *cv_error *= scale;
                 break;
         }
     }
 
-    vector<mf_int> inv_p_map = Utility::gen_inv_map(p_map);
-    vector<mf_int> inv_q_map = Utility::gen_inv_map(q_map);
-
     if(!param.copy_data)
     {
-        util.scale_problem(*tr, std_dev);
-        util.scale_problem(*va, std_dev);
+        util.scale_problem(*tr, scale);
+        util.scale_problem(*va, scale);
         util.shuffle_problem(*tr, inv_p_map, inv_q_map);
         util.shuffle_problem(*va, inv_p_map, inv_q_map);
     }
 
-    util.scale_model(*model, sqrt(std_dev));
-    Utility::shrink_model(*model, param.k);
-    Utility::shuffle_model(*model, inv_p_map, inv_q_map);
-
     return model;
 }
+
+void Utility::collect_info(mf_problem &prob, mf_float &avg, mf_float &std_dev)
+{
+    mf_float sq_avg = 0;
+    avg = 0;
+
+#if defined USEOMP
+#pragma omp parallel for num_threads(nr_threads) schedule(static) reduction(+:avg,sq_avg)
+#endif
+    for(mf_long i = 0; i < prob.nnz; i++)
+    {
+       avg += prob.R[i].r;
+       sq_avg += prob.R[i].r*prob.R[i].r;
+    }
+
+    avg /= prob.nnz;
+    sq_avg /= prob.nnz;
+    std_dev = sqrt(sq_avg-avg*avg);
+}
+
+void Utility::collect_info(string data_path, mf_problem &prob, mf_float &avg, mf_float &std_dev)
+{
+    mf_double avg_sq = 0;
+
+    ifstream sourse(data_path.c_str());
+    if(!sourse.is_open())
+        throw runtime_error("cannot open " + data_path);
+
+    for(mf_node N; sourse >> N.u >> N.v >> N.r;)
+    {
+        if(N.u+1 > prob.m)
+            prob.m = N.u+1;
+        if(N.v+1 > prob.n)
+            prob.n = N.v+1;
+        prob.nnz++;
+        avg += N.r;
+        avg_sq += N.r*N.r;
+    }
+
+    avg /= prob.nnz;
+    avg_sq /= prob.nnz;
+    std_dev = sqrt(avg_sq-avg*avg);
+}
+
 
 shared_ptr<mf_model> fpsg_on_disk(
     const string tr_path,
@@ -1660,251 +1759,43 @@ shared_ptr<mf_model> fpsg_on_disk(
     mf_parameter param)
 {
     param.nr_bins = max(param.nr_bins, 2*param.nr_threads);
-    Utility util(param.solver, param.nr_threads);
-
-    mf_problem va = read_problem(va_path.c_str());
-
-    ifstream tr_sourse(tr_path.c_str());
-    if(!tr_sourse.is_open())
-        throw runtime_error("cannot open " + tr_path);
-
-    mf_int m = 0;
-    mf_int n = 0;
-    mf_long nnz = 0;
-    mf_double avg = 0;
-    mf_double avg_sq = 0;
-
-    for(mf_node N; tr_sourse >> N.u >> N.v >> N.r;)
-    {
-        if(N.u+1 > m)
-            m = N.u+1;
-        if(N.v+1 > n)
-            n = N.v+1;
-        nnz++;
-        avg += N.r;
-        avg_sq += N.r*N.r;
-    }
-    tr_sourse.clear();
-    tr_sourse.seekg(0);
-
-    avg /= nnz;
-    avg_sq/=nnz;
-
-    mf_float std_dev = 1;
-
-    if(param.solver == P_L2_MFR || param.solver == P_L1_MFR)
-    {
-        std_dev = max((mf_float)1e-4, (mf_float)sqrt(avg_sq - avg*avg));
-        util.scale_problem(va, 1.0/std_dev);
-        switch(param.solver)
-        {
-            case P_L2_MFR:
-                param.lambda_p2 /= std_dev;
-                param.lambda_q2 /= std_dev;
-                param.lambda_p1 /= pow(std_dev, 1.5);
-                param.lambda_q1 /= pow(std_dev, 1.5);
-                break;
-            case P_L1_MFR:
-                param.lambda_p1 /= sqrt(std_dev);
-                param.lambda_q1 /= sqrt(std_dev);
-                break;
-        }
-    }
-
-    vector<mf_int> p_map = Utility::gen_random_map(m);
-    vector<mf_int> q_map = Utility::gen_random_map(n);
-
-    util.shuffle_problem(va, p_map, q_map);
-
-    size_t p = tr_path.rfind('/');
-    string dirname;
-    if(p != string::npos)
-        dirname = tr_path.substr(p+1);
-    else
-        dirname = tr_path;
-
-    auto num_to_str = [] (mf_int num)
-    {
-        stringstream buf;
-        buf << num;
-        return buf.str();
-    };
-
-    dirname += string(".blocks.") + num_to_str(param.nr_bins*param.nr_bins);
-    
-    if(mkdir(dirname.c_str(), 0755) != 0)
-        throw runtime_error("cannot create directory " + dirname);
 
     vector<BlockOnDisk> blocks(param.nr_bins*param.nr_bins);
-    vector<BlockBase*> p_blocks(param.nr_bins*param.nr_bins);
-    for(mf_int i = 0; i < param.nr_bins*param.nr_bins; i++)
-    {
-        string str = dirname+string("/block")+num_to_str(i);
-        blocks[i].tie_to(str.c_str());
-        p_blocks[i] = &blocks[i];
-    }
 
-    mf_int seg_p = (mf_int)ceil((double)m/param.nr_bins);
-    mf_int seg_q = (mf_int)ceil((double)n/param.nr_bins);
+    mf_problem tr = mf_problem();
+    mf_problem va = read_problem(va_path.c_str());
+    mf_float avg = 0;
+    mf_float std_dev = 0;
 
-    auto get_block = [=] (mf_int u, mf_int v)
-    {
-        return (u/seg_p)*param.nr_bins+v/seg_q;
-    };
+    Utility util(param.solver, param.nr_threads);
 
-    vector<mf_int> omega_p(m, 0), omega_q(n, 0);
-    set<mf_int> u_set;
-    set<mf_int> v_set;
+    util.collect_info(tr_path, tr, avg, std_dev);
 
-    for(mf_node N; tr_sourse >> N.u >> N.v >> N.r;)
-    {
-        N.u = p_map[N.u];
-        N.v = q_map[N.v];
-        N.r /= std_dev;
-        mf_int bid = get_block(N.u, N.v);
-        blocks[bid].append(N);
-        u_set.insert(N.u);
-        v_set.insert(N.v);
-        omega_p[N.u]++;
-        omega_q[N.v]++;
-    }
-    for(mf_int i = 0; i < param.nr_bins*param.nr_bins; i++)
-        blocks[i].reset();
-    tr_sourse.close();
+    mf_float scale = 1;
+    if(param.solver == P_L2_MFR || param.solver == P_L1_MFR)
+        scale = max((mf_float)1e-4, std_dev);
+
+    vector<mf_int> p_map = Utility::gen_random_map(tr.m);
+    vector<mf_int> q_map = Utility::gen_random_map(tr.n);
+    vector<mf_int> inv_p_map = Utility::gen_inv_map(p_map);
+    vector<mf_int> inv_q_map = Utility::gen_inv_map(q_map);
+    vector<mf_int> omega_p(tr.m, 0), omega_q(tr.n, 0);
     
-    for(mf_int i = 0; i < param.nr_bins*param.nr_bins; i++)
-    {
-        vector<mf_node> nodes;
-        while(blocks[i].move_next())
-        {
-            mf_node *N = blocks[i].get_current();
-            nodes.push_back(*N);
-        }
-        blocks[i].reset();
+    util.grid_problem(tr.m, tr.n, param.nr_bins, scale, tr_path, blocks, p_map, q_map, omega_p, omega_q);
+    util.shuffle_problem(va, p_map, q_map);
+    util.scale_problem(va, 1.0/scale);
 
-        if(m > n)
-            sort(nodes.begin(), nodes.end(), sort_node_by_p());
-        else
-            sort(nodes.begin(), nodes.end(), sort_node_by_q());
-
-        for(int j = 0; j < nodes.size(); j++)
-            blocks[i].append(nodes[j]);
-        blocks[i].reset();
-    }
-
-    mf_int k_aligned = (mf_int)ceil(mf_double(param.k)/kALIGN)*kALIGN;
-
-    shared_ptr<mf_model> model(Utility::init_model_on_disk(m, n, u_set, v_set, param.k, k_aligned),
+    shared_ptr<mf_model> model(Utility::init_model(tr.m, tr.n, param.k, omega_p, omega_q),
                                [] (mf_model *ptr) { mf_destroy_model(&ptr); });
+
+    vector<BlockBase*> block_ptrs(param.nr_bins*param.nr_bins);
+    for(mf_int i = 0; i < param.nr_bins*param.nr_bins; i++)
+        block_ptrs[i] = &blocks[i];
 
     Scheduler sched(param.nr_bins, param.nr_threads, vector<mf_int>());
 
-    bool slow_only = param.lambda_p1 == 0 && param.lambda_q1 == 0? true: false;
-
-    vector<mf_float> PG(model->m*2, 1), QG(model->n*2, 1);
-
-#if defined USESSE || defined USEAVX
-    auto flush_zero_mode = _MM_GET_FLUSH_ZERO_MODE();
-    _MM_SET_FLUSH_ZERO_MODE(_MM_FLUSH_ZERO_ON);
-#endif
-
-    if(!param.quiet)
-    {
-        cout.width(4);
-        cout << "iter";
-        cout.width(13);
-        cout << "tr_"+util.get_error_legend();
-        if(va.nnz != 0)
-        {
-            cout.width(13);
-            cout << "va_"+util.get_error_legend();
-        }
-        cout.width(13);
-        cout << "obj";
-        cout << "\n";
-    }
-
-    vector<thread> threads;
-    for(mf_int i = 0; i < param.nr_threads; i++)
-        threads.emplace_back(sg, ref(p_blocks), ref(*model), ref(sched), param,
-                             ref(slow_only), PG.data(), QG.data());
-
-    for(mf_int iter = 0; iter < param.nr_iters; iter++)
-    {
-        sched.wait_for_jobs_done();
-
-        if(!param.quiet)
-        {
-            mf_double reg = 0;
-            mf_double reg1 = util.calc_reg1(*model, param.lambda_p1,
-                             param.lambda_q1, omega_p, omega_q);
-            mf_double reg2 = util.calc_reg2(*model, param.lambda_p2,
-                             param.lambda_q2, omega_p, omega_q);
-            mf_double tr_loss = sched.get_loss();
-            mf_double tr_error = sched.get_error()/nnz;
-
-            switch(param.solver)
-            {
-                case P_L2_MFR:
-                    reg = reg1*sqrt(std_dev)+reg2*std_dev;
-                    tr_loss *= std_dev*std_dev;
-                    tr_error = sqrt(tr_error*std_dev*std_dev);
-                    break;
-                case P_L1_MFR:
-                    reg = reg1*sqrt(std_dev)+reg2*std_dev;
-                    tr_loss *= std_dev;
-                    tr_error *= std_dev;
-                    break;
-                default:
-                    reg = reg1+reg2;
-                    break;
-            }
-
-            cout.width(4);
-            cout << iter;
-            cout.width(13);
-            cout << fixed << setprecision(4) << tr_error;
-            if(va.nnz != 0)
-            {
-                mf_double va_error = util.calc_error(va.R, va.nnz, *model)/va.nnz;
-                switch(param.solver)
-                {
-                    case P_L2_MFR:
-                        va_error = sqrt(va_error*std_dev*std_dev);
-                        break;
-                    case P_L1_MFR:
-                        va_error *= std_dev;
-                        break;
-                }
-
-                cout.width(13);
-                cout << fixed << setprecision(4) << va_error;
-            }
-            cout.width(13);
-            cout << fixed << setprecision(4) << scientific << reg+tr_loss;
-            cout << "\n" << flush;
-        }
-
-        if(iter == 0)
-            slow_only = false;
-
-        sched.resume();
-    }
-    sched.terminate();
-
-    for(auto &thread : threads)
-        thread.join();
-
-#if defined USESSE || defined USEAVX
-    _MM_SET_FLUSH_ZERO_MODE(flush_zero_mode);
-#endif
-
-    vector<mf_int> inv_p_map = Utility::gen_inv_map(p_map);
-    vector<mf_int> inv_q_map = Utility::gen_inv_map(q_map);
-
-    util.scale_model(*model, sqrt(std_dev));
-    Utility::shrink_model(*model, param.k);
-    Utility::shuffle_model(*model, inv_p_map, inv_q_map);
+    fpsg_core(util, sched, &tr, &va, param, scale, block_ptrs,
+            p_map, q_map, inv_p_map, inv_q_map, omega_p, omega_q, model);
 
     return model;
 }
@@ -2388,6 +2279,7 @@ mf_parameter mf_get_default_param()
     param.quiet = false;
     param.copy_data = true;
     param.solver = P_L2_MFR;
+    param.disk = false;
 
     return param;
 }
