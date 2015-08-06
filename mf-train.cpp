@@ -232,6 +232,7 @@ Option parse_option(int argc, char **argv)
         throw invalid_argument("invalid argument");
     }
 
+    option.param.nr_bins = max(option.param.nr_bins, 2*option.param.nr_threads);
     option.param.copy_data = false;
 
     return option;
