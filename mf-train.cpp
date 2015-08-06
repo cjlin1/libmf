@@ -1,11 +1,11 @@
+#include <algorithm>
+#include <cmath>
 #include <cstring>
 #include <cstdlib>
 #include <fstream>
 #include <iostream>
-#include <string>
-#include <cmath>
 #include <stdexcept>
-#include <algorithm>
+#include <string>
 #include <vector>
 
 #include "mf.h"
