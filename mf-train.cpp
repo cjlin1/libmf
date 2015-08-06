@@ -52,7 +52,7 @@ string train_help()
 "-v <fold>: set number of folds for cross validation\n"
 "--quiet: quiet mode (no outputs)\n"
 "--nmf: perform non-negative matrix factorization\n"
-"--disk <blocks>: do disk-level training with block files\n");
+"--disk <blocks>: do disk-level training using file buffers\n");
 }
 
 Option parse_option(int argc, char **argv)
@@ -91,12 +91,12 @@ Option parse_option(int argc, char **argv)
             i++;
 
             char *pch = strtok(argv[i], ",");
-            option.param.lambda_p2 = strtod(pch, NULL);
-            option.param.lambda_q2 = strtod(pch, NULL);
+            option.param.lambda_p2 = (mf_float)strtod(pch, NULL);
+            option.param.lambda_q2 = (mf_float)strtod(pch, NULL);
             pch = strtok(NULL, ",");
             if(pch != NULL)
             {
-                option.param.lambda_q2 = strtod(pch, NULL);
+                option.param.lambda_q2 = (mf_float)strtod(pch, NULL);
             }
         }
         else if(args[i].compare("-k") == 0)
@@ -118,7 +118,7 @@ Option parse_option(int argc, char **argv)
             if((i+1) >= argc)
                 throw invalid_argument("need to specify eta after -r");
             i++;
-            option.param.eta = atof(argv[i]);
+            option.param.eta = (mf_float)atof(argv[i]);
         }
         else if(args[i].compare("-s") == 0)
         {
@@ -166,7 +166,7 @@ Option parse_option(int argc, char **argv)
             option.disk = true;
             i++;
             mf_int nr_blocks = atoi(argv[i]);
-            option.param.nr_bins = ceil(sqrt(nr_blocks));
+            option.param.nr_bins = (mf_int)ceil(sqrt(nr_blocks));
         }
         else
         {
@@ -222,7 +222,8 @@ int main(int argc, char **argv)
         return 1;
     }
 
-    mf_problem tr, va;
+    mf_problem tr = {};
+    mf_problem va = {};
     if(option.disk != true)
     {
         try

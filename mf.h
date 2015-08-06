@@ -85,7 +85,7 @@ struct mf_model* mf_train_with_validation_on_disk(
     char const *va_path,
     struct mf_parameter param);
 
-mf_float mf_cross_validation(
+mf_double mf_cross_validation(
     struct mf_problem const *prob,
     mf_int nr_folds,
     struct mf_parameter param);

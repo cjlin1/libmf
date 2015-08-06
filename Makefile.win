@@ -1,5 +1,5 @@
 CXX = cl.exe
-CFLAGS = /nologo /O2 /EHsc /D "_CRT_SECURE_NO_DEPRECATE"
+CFLAGS = /W4 /nologo /O2 /EHsc /D "_CRT_SECURE_NO_DEPRECATE"
 CFLAGS = $(CFLAGS) /D "USESSE"
 CFLAGS = $(CFLAGS) /D "USEOMP" /openmp
 

@@ -17,6 +17,12 @@
 #include <unordered_set>
 #include <vector>
 
+#ifdef _WIN32
+#include<direct.h>
+#else
+#include<sys/stat.h>
+#endif
+
 #include "mf.h"
 
 #if defined USESSE
@@ -87,9 +93,9 @@ Scheduler::Scheduler(mf_int nr_bins, mf_int nr_threads, vector<mf_int> cv_blocks
       counts(nr_bins*nr_bins, 0),
       busy_p_blocks(nr_bins, 0),
       busy_q_blocks(nr_bins, 0),
-      cv_blocks(cv_blocks.begin(), cv_blocks.end()),
       block_losses(nr_bins*nr_bins, 0),
       block_errors(nr_bins*nr_bins, 0),
+      cv_blocks(cv_blocks.begin(), cv_blocks.end()),
       distribution(0.0, 1.0)
 {
     for(mf_int i = 0; i < nr_bins*nr_bins; i++)
@@ -503,8 +509,8 @@ void sg(vector<BlockBase*> &p_blocks, mf_model &model, Scheduler &sched,
     __m128 XMMlambda_p2 = _mm_set1_ps(param.lambda_p2);
     __m128 XMMlambda_q2 = _mm_set1_ps(param.lambda_q2);
     __m128 XMMeta = _mm_set1_ps(param.eta);
-    __m128 XMMrk_slow = _mm_set1_ps(1.0/kALIGN);
-    __m128 XMMrk_fast = _mm_set1_ps(1.0/(model.k-kALIGN));
+    __m128 XMMrk_slow = _mm_set1_ps((mf_float)1.0/kALIGN);
+    __m128 XMMrk_fast = _mm_set1_ps((mf_float)1.0/(model.k-kALIGN));
     while(true)
     {
         mf_int bid = sched.get_job();
@@ -935,8 +941,8 @@ void Utility::collect_info(
     mf_float &avg,
     mf_float &std_dev)
 {
-    mf_float ex = 0;
-    mf_float ex2 = 0;
+    mf_double ex = 0;
+    mf_double ex2 = 0;
 
 #if defined USEOMP
 #pragma omp parallel for num_threads(nr_threads) schedule(static) reduction(+:ex,ex2)
@@ -944,14 +950,14 @@ void Utility::collect_info(
     for(mf_long i = 0; i < prob.nnz; i++)
     {
         mf_node &N = prob.R[i];
-        ex += N.r;
-        ex2 += N.r*N.r;
+        ex += (mf_double)N.r;
+        ex2 += (mf_double)N.r*N.r;
     }
 
-    ex /= prob.nnz;
-    ex2 /= prob.nnz;
-    avg = ex;
-    std_dev = sqrt(ex2-ex*ex);
+    ex /= (mf_double)prob.nnz;
+    ex2 /= (mf_double)prob.nnz;
+    avg = (mf_float)ex;
+    std_dev = (mf_float)sqrt(ex2-ex*ex);
 }
 
 void Utility::collect_info_on_disk(
@@ -960,29 +966,30 @@ void Utility::collect_info_on_disk(
     mf_float &avg,
     mf_float &std_dev)
 {
-    mf_double avg_sq = 0;
+    mf_double ex = 0;
+    mf_double ex2 = 0;
 
-    ifstream sourse(data_path.c_str());
-    if(!sourse.is_open())
+    ifstream source(data_path.c_str());
+    if(!source.is_open())
         throw runtime_error("cannot open " + data_path);
 
-    for(mf_node N; sourse >> N.u >> N.v >> N.r;)
+    for(mf_node N; source >> N.u >> N.v >> N.r;)
     {
         if(N.u+1 > prob.m)
             prob.m = N.u+1;
         if(N.v+1 > prob.n)
             prob.n = N.v+1;
         prob.nnz++;
-        avg += N.r;
-        avg_sq += N.r*N.r;
+        ex += (mf_double)N.r;
+        ex2 += (mf_double)N.r*N.r;
     }
+    source.close();
 
-    avg /= prob.nnz;
-    avg_sq /= prob.nnz;
-    std_dev = sqrt(avg_sq-avg*avg);
+    ex /= (mf_double)prob.nnz;
+    ex2 /= (mf_double)prob.nnz;
+    avg = (mf_float)ex;
+    std_dev = (mf_float)sqrt(ex2-ex*ex);
 }
-
-
 
 void Utility::scale_problem(mf_problem &prob, mf_float scale)
 {
@@ -1163,9 +1170,9 @@ void Utility::shuffle_problem(
     for(mf_long i = 0; i < prob.nnz; i++)
     {
         mf_node &N = prob.R[i];
-        if(N.u < p_map.size())
+        if(N.u < (mf_long)p_map.size())
             N.u = p_map[N.u];
-        if(N.v < q_map.size())
+        if(N.v < (mf_long)q_map.size())
             N.v = q_map[N.v];
     }
 }
@@ -1257,8 +1264,10 @@ void Utility::grid_shuffle_scale_problem_on_disk(
         return (u/seg_p)*nr_bins+v/seg_q;
     };
 
-    ifstream source(data_path);
-    for(mf_node N; source >> N.u >> N.v >> N.r;)
+    fstream data(data_path.c_str());
+    if(!data)
+        cerr << "fail to open file " << data_path << endl;
+    for(mf_node N; data >> N.u >> N.v >> N.r;)
     {
         N.u = p_map[N.u];
         N.v = q_map[N.v];
@@ -1271,7 +1280,7 @@ void Utility::grid_shuffle_scale_problem_on_disk(
     }
     for(mf_int i = 0; i < nr_bins*nr_bins; i++)
         blocks[i].reset();
-    source.close();
+    data.close();
 
     for(mf_int i = 0; i < nr_bins*nr_bins; i++)
     {
@@ -1288,7 +1297,7 @@ void Utility::grid_shuffle_scale_problem_on_disk(
         else
             sort(nodes.begin(), nodes.end(), sort_node_by_q());
 
-        for(int j = 0; j < nodes.size(); j++)
+        for(mf_int j = 0; j < (mf_long)nodes.size(); j++)
             blocks[i].append(nodes[j]);
         blocks[i].reset();
     }
@@ -1323,7 +1332,7 @@ mf_model* Utility::init_model(mf_int m, mf_int n, mf_int k, vector<mf_int> &omeg
     model->P = nullptr;
     model->Q = nullptr;
 
-    mf_float scale = sqrt(1.0/k_real);
+    mf_float scale = (mf_float)sqrt(1.0/k_real);
     default_random_engine generator;
     uniform_real_distribution<mf_float> distribution(0.0, 1.0);
 
@@ -1371,7 +1380,7 @@ vector<mf_int> Utility::gen_random_map(mf_int size)
 vector<mf_int> Utility::gen_inv_map(vector<mf_int> &map)
 {
     vector<mf_int> inv_map(map.size());
-    for(mf_int i = 0; i < map.size(); i++)
+    for(mf_int i = 0; i < (mf_long)map.size(); i++)
       inv_map[map[i]] = i;
     return inv_map;
 }
@@ -1428,8 +1437,8 @@ void Utility::shrink_model(mf_model &model, mf_int k_new)
 vector<string> Utility::get_block_paths(string data_path, mf_int nr_bins)
 {
     string dirname;
-    if(data_path.rfind('/') != string::npos)
-        dirname = data_path.substr(data_path.rfind('/')+1);
+    if(data_path.rfind("/") != string::npos)
+        dirname = data_path.substr(data_path.rfind("/")+1);
     else
         dirname = data_path;
 
@@ -1442,8 +1451,20 @@ vector<string> Utility::get_block_paths(string data_path, mf_int nr_bins)
 
     dirname += string(".blocks.")+num_to_str(nr_bins*nr_bins);
 
-    if(system((string("mkdir ")+dirname).c_str()) != 0)
-        throw runtime_error("");
+    try
+    {
+#ifdef _WIN32
+        if(_mkdir(dirname.c_str()) != 0)
+#else
+        if(mkdir(dirname.c_str(), 0755) != 0)
+#endif
+        throw runtime_error(string("problem creating directory ")+dirname);
+    }
+    catch(runtime_error const &e)
+    {
+        cerr << e.what() << endl;
+        throw;
+    }
 
     vector<string> block_paths(nr_bins*nr_bins);
     for(mf_int i = 0; i < nr_bins*nr_bins; i++)
@@ -1499,8 +1520,6 @@ void fpsg_core(
     mf_parameter &param,
     mf_float scale,
     vector<BlockBase*> &block_ptrs,
-    vector<mf_int> &p_map,
-    vector<mf_int> &q_map,
     vector<mf_int> &inv_p_map,
     vector<mf_int> &inv_q_map,
     vector<mf_int> &omega_p,
@@ -1514,8 +1533,8 @@ void fpsg_core(
             case P_L2_MFR:
                 param.lambda_p2 /= scale;
                 param.lambda_q2 /= scale;
-                param.lambda_p1 /= pow(scale, 1.5);
-                param.lambda_q1 /= pow(scale, 1.5);
+                param.lambda_p1 /= (mf_float)pow(scale, 1.5);
+                param.lambda_q1 /= (mf_float)pow(scale, 1.5);
                 break;
             case P_L1_MFR:
                 param.lambda_p1 /= sqrt(scale);
@@ -1687,8 +1706,8 @@ shared_ptr<mf_model> fpsg(
 
     util.shuffle_problem(*tr, p_map, q_map);
     util.shuffle_problem(*va, p_map, q_map);
-    util.scale_problem(*tr, 1.0/scale);
-    util.scale_problem(*va, 1.0/scale);
+    util.scale_problem(*tr, (mf_float)1.0/scale);
+    util.scale_problem(*va, (mf_float)1.0/scale);
     ptrs = util.grid_problem(*tr, param.nr_bins, omega_p, omega_q);
 
     for(mf_int i = 0; i < param.nr_bins*param.nr_bins; i++)
@@ -1701,7 +1720,7 @@ shared_ptr<mf_model> fpsg(
                                [] (mf_model *ptr) { mf_destroy_model(&ptr); });
 
     fpsg_core(util, sched, tr.get(), va.get(), param, scale, block_ptrs,
-            p_map, q_map, inv_p_map, inv_q_map, omega_p, omega_q, model);
+            inv_p_map, inv_q_map, omega_p, omega_q, model);
 
     if(cv_error != nullptr)
     {
@@ -1743,7 +1762,7 @@ shared_ptr<mf_model> fpsg_on_disk(
 {
     Utility util(param.solver, param.nr_threads);
     Scheduler sched(param.nr_bins, param.nr_threads, vector<mf_int>());
-    mf_problem tr = mf_problem();
+    mf_problem tr = {};
     mf_problem va = read_problem(va_path.c_str());
     shared_ptr<mf_model> model;
     vector<BlockOnDisk> blocks(param.nr_bins*param.nr_bins);
@@ -1771,7 +1790,7 @@ shared_ptr<mf_model> fpsg_on_disk(
     omega_q = vector<mf_int>(tr.n, 0);
 
     util.shuffle_problem(va, p_map, q_map);
-    util.scale_problem(va, 1.0/scale);
+    util.scale_problem(va, (mf_float)1.0/scale);
     util.grid_shuffle_scale_problem_on_disk(
         tr.m, tr.n, param.nr_bins, scale, tr_path,
         blocks, p_map, q_map, omega_p, omega_q);
@@ -1783,17 +1802,15 @@ shared_ptr<mf_model> fpsg_on_disk(
         block_ptrs[i] = &blocks[i];
 
     fpsg_core(util, sched, &tr, &va, param, scale, block_ptrs,
-            p_map, q_map, inv_p_map, inv_q_map, omega_p, omega_q, model);
+            inv_p_map, inv_q_map, omega_p, omega_q, model);
 
     delete [] va.R;
 
     return model;
 }
 
-void check_parameter(mf_parameter param)
+bool check_parameter(mf_parameter param)
 {
-    bool result = true;
-
     if(param.solver != P_L2_MFR &&
        param.solver != P_L1_MFR &&
        param.solver != P_LR_MFC &&
@@ -1803,31 +1820,31 @@ void check_parameter(mf_parameter param)
        param.solver != P_COL_BPR_MFOC)
     {
         cerr << "unknown solver type" << endl;
-        exit(1);
+        return false;
     }
 
     if(param.k < 1)
     {
         cerr << "number of factors must be greater than zero" << endl;
-        exit(1);
+        return false;
     }
 
     if(param.nr_threads < 1)
     {
         cerr << "number of threads must be greater than zero" << endl;
-        exit(1);
+        return false;
     }
 
     if(param.nr_bins < 1 || param.nr_bins < param.nr_threads)
     {
         cerr << "number of bins must be greater than number of threads" << endl;
-        exit(1);
+        return false;
     }
 
     if(param.nr_iters < 1)
     {
         cerr << "number of iterations must be greater than zero" << endl;
-        exit(1);
+        return false;
     }
 
     if(param.lambda_p1 < 0 ||
@@ -1836,14 +1853,16 @@ void check_parameter(mf_parameter param)
        param.lambda_q2 < 0)
     {
         cerr << "regularization coefficient must be non-negative" << endl;
-        exit(1);
+        return false;
     }
 
     if(param.eta < 0)
     {
         cerr << "learning rate should be must than zero" << endl;
-        exit(1);
+        return false;
     }
+
+    return true;
 }
 
 } // unnamed namespace
@@ -1853,7 +1872,9 @@ mf_model* mf_train_with_validation(
     mf_problem const *va,
     mf_parameter param)
 {
-    check_parameter(param);
+    if(!check_parameter(param))
+        return nullptr;
+
     shared_ptr<mf_model> model = fpsg(tr, va, param);
 
     mf_model *model_ret = new mf_model;
@@ -1876,7 +1897,9 @@ mf_model* mf_train_with_validation_on_disk(
     char const *va_path,
     mf_parameter param)
 {
-    check_parameter(param);
+    if(!check_parameter(param))
+        return nullptr;
+
     shared_ptr<mf_model> model = fpsg_on_disk(string(tr_path), string(va_path), param);
 
     mf_model *model_ret = new mf_model;
@@ -1904,12 +1927,14 @@ mf_model* mf_train_on_disk(char const *tr_path, mf_parameter param)
     return mf_train_with_validation_on_disk(tr_path, nullptr, param);
 }
 
-mf_float mf_cross_validation(
+mf_double mf_cross_validation(
     mf_problem const *prob,
     mf_int nr_folds,
     mf_parameter param)
 {
-    check_parameter(param);
+    if(!check_parameter(param))
+        return 0;
+
     bool quiet = param.quiet;
     param.quiet = true;
 
@@ -1934,8 +1959,6 @@ mf_float mf_cross_validation(
     }
 
     mf_double err = 0;
-    mf_int idx = 0;
-    mf_long count = 0;
     for(mf_int fold = 0; fold < nr_folds; fold++)
     {
         mf_int begin = fold*nr_blocks_per_fold;
@@ -2224,8 +2247,8 @@ pair<mf_double, mf_double> calc_mpr_auc(mf_problem *prob, mf_model *model, bool 
     for(mf_int i = 1; i < m+1; i++)
         pos_cnts[i] += pos_cnts[i-1];
 
-    mf_float all_u_mpr = 0;
-    mf_float all_u_auc = 0;
+    mf_double all_u_mpr = 0;
+    mf_double all_u_auc = 0;
 #if defined USEOMP
 #pragma omp parallel for schedule(static) reduction(+: all_u_mpr, all_u_auc)
 #endif
