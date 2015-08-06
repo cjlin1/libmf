@@ -21,8 +21,7 @@
 #include <stdexcept>
 #include <map>
 #include <tuple>
-#include <sys/types.h>
-#include <sys/stat.h>
+#include <cstdlib>
 
 #include "mf.h"
 
@@ -942,22 +941,23 @@ void Utility::collect_info(
     mf_float &avg,
     mf_float &std_dev)
 {
-    mf_float sq_avg = 0;
-    avg = 0;
+    mf_float ex = 0;
+    mf_float ex2 = 0;
 
 #if defined USEOMP
-#pragma omp parallel for num_threads(nr_threads) schedule(static) reduction(+:avg,sq_avg)
+#pragma omp parallel for num_threads(nr_threads) schedule(static) reduction(+:ex,ex2)
 #endif
     for(mf_long i = 0; i < prob.nnz; i++)
     {
         mf_node &N = prob.R[i];
-        avg += N.r;
-        sq_avg += N.r*N.r;
+        ex += N.r;
+        ex2 += N.r*N.r;
     }
 
-    avg /= prob.nnz;
-    sq_avg /= prob.nnz;
-    std_dev = sqrt(sq_avg-avg*avg);
+    ex /= prob.nnz;
+    ex2 /= prob.nnz;
+    avg = ex;
+    std_dev = sqrt(ex2-ex*ex);
 }
 
 void Utility::collect_info_on_disk(
@@ -1446,10 +1446,10 @@ vector<string> Utility::get_block_paths(string data_path, mf_int nr_bins)
         return buf.str();
     };
 
-    dirname += string(".blocks.") + num_to_str(nr_bins*nr_bins);
+    dirname += string(".blocks.")+num_to_str(nr_bins*nr_bins);
 
-    if(mkdir(dirname.c_str(), 0755) != 0)
-        throw runtime_error("cannot create directory " + dirname);
+    if(system((string("mkdir ")+dirname).c_str()) != 0)
+        throw runtime_error("");
 
     vector<string> block_paths(nr_bins*nr_bins);
     for(mf_int i = 0; i < nr_bins*nr_bins; i++)
@@ -1791,7 +1791,65 @@ shared_ptr<mf_model> fpsg_on_disk(
     fpsg_core(util, sched, &tr, &va, param, scale, block_ptrs,
             p_map, q_map, inv_p_map, inv_q_map, omega_p, omega_q, model);
 
+    delete [] va.R;
+
     return model;
+}
+
+void check_parameter(mf_parameter param)
+{
+    bool result = true;
+
+    if(param.solver != P_L2_MFR &&
+       param.solver != P_L1_MFR &&
+       param.solver != P_LR_MFC &&
+       param.solver != P_L2_MFC &&
+       param.solver != P_L1_MFC &&
+       param.solver != P_ROW_BPR_MFOC &&
+       param.solver != P_COL_BPR_MFOC)
+    {
+        cerr << "unknown solver type" << endl;
+        exit(1);
+    }
+
+    if(param.k < 1)
+    {
+        cerr << "number of factors must be greater than zero" << endl;
+        exit(1);
+    }
+
+    if(param.nr_threads < 1)
+    {
+        cerr << "number of threads must be greater than zero" << endl;
+        exit(1);
+    }
+
+    if(param.nr_bins < 1 || param.nr_bins < param.nr_threads)
+    {
+        cerr << "number of bins must be greater than number of threads" << endl;
+        exit(1);
+    }
+
+    if(param.nr_iters < 1)
+    {
+        cerr << "number of iterations must be greater than zero" << endl;
+        exit(1);
+    }
+
+    if(param.lambda_p1 < 0 ||
+       param.lambda_p2 < 0 ||
+       param.lambda_q1 < 0 ||
+       param.lambda_q2 < 0)
+    {
+        cerr << "regularization coefficient must be non-negative" << endl;
+        exit(1);
+    }
+
+    if(param.eta < 0)
+    {
+        cerr << "learning rate should be must than zero" << endl;
+        exit(1);
+    }
 }
 
 } // unnamed namespace
@@ -1801,6 +1859,7 @@ mf_model* mf_train_with_validation(
     mf_problem const *va,
     mf_parameter param)
 {
+    check_parameter(param);
     shared_ptr<mf_model> model = fpsg(tr, va, param);
 
     mf_model *model_ret = new mf_model;
@@ -1823,6 +1882,7 @@ mf_model* mf_train_with_validation_on_disk(
     char const *va_path,
     mf_parameter param)
 {
+    check_parameter(param);
     shared_ptr<mf_model> model = fpsg_on_disk(string(tr_path), string(va_path), param);
 
     mf_model *model_ret = new mf_model;
@@ -1855,6 +1915,7 @@ mf_float mf_cross_validation(
     mf_int nr_folds,
     mf_parameter param)
 {
+    check_parameter(param);
     bool quiet = param.quiet;
     param.quiet = true;
 
@@ -1930,13 +1991,12 @@ mf_problem read_problem(string path)
     prob.R = nullptr;
 
     if(path.empty())
-    {
         return prob;
-    }
 
     ifstream f(path);
     if(!f.is_open())
-        throw runtime_error("cannot open " + path);
+        return prob;
+
     string line;
     while(getline(f, line))
         prob.nnz++;
@@ -2196,7 +2256,7 @@ pair<mf_double, mf_double> calc_mpr_auc(mf_problem *prob, mf_model *model, bool 
         mf_double u_mpr = 0;
         mf_double u_auc = 0;
 
-        mf_int index[pos_cnts[i+1]-pos_cnts[i]];
+        vector<mf_int> index(pos_cnts[i+1]-pos_cnts[i], 0);
         for(mf_int j = pos_cnts[i]; j < pos_cnts[i+1]; j++)
         {
             if(prob->R[j].r > 0)
@@ -2259,10 +2319,10 @@ mf_parameter mf_get_default_param()
 {
     mf_parameter param;
 
+    param.solver = P_L2_MFR;
     param.k = 8;
     param.nr_threads = 12;
     param.nr_bins = 20;
-    param.nr_blocks = 0;
     param.nr_iters = 20;
     param.lambda_p1 = 0.0f;
     param.lambda_q1 = 0.0f;
@@ -2272,8 +2332,6 @@ mf_parameter mf_get_default_param()
     param.do_nmf = false;
     param.quiet = false;
     param.copy_data = true;
-    param.solver = P_L2_MFR;
-    param.disk = false;
 
     return param;
 }

@@ -4,7 +4,7 @@
 #include <utility>
 
 #ifdef __cplusplus
-extern "C" 
+extern "C"
 {
 
 namespace mf
@@ -37,21 +37,19 @@ struct mf_problem
 
 struct mf_parameter
 {
-    mf_int k; 
+    mf_int solver;
+    mf_int k;
     mf_int nr_threads;
     mf_int nr_bins;
-    mf_int nr_blocks;
     mf_int nr_iters;
     mf_float lambda_p1;
     mf_float lambda_p2;
     mf_float lambda_q1;
     mf_float lambda_q2;
     mf_float eta;
-    mf_int do_nmf;
-    mf_int quiet; 
-    mf_int disk;
-    mf_int copy_data;
-    mf_int solver;
+    bool do_nmf;
+    bool quiet;
+    bool copy_data;
 };
 
 struct mf_parameter mf_get_default_param();
@@ -74,12 +72,12 @@ struct mf_model* mf_load_model(char const *path);
 void mf_destroy_model(struct mf_model **model);
 
 struct mf_model* mf_train(
-    struct mf_problem const *prob, 
+    struct mf_problem const *prob,
     struct mf_parameter param);
 
 struct mf_model* mf_train_with_validation(
-    struct mf_problem const *tr, 
-    struct mf_problem const *va, 
+    struct mf_problem const *tr,
+    struct mf_problem const *va,
     struct mf_parameter param);
 
 struct mf_model* mf_train_with_validation_on_disk(
@@ -88,8 +86,8 @@ struct mf_model* mf_train_with_validation_on_disk(
     struct mf_parameter param);
 
 mf_float mf_cross_validation(
-    struct mf_problem const *prob, 
-    mf_int nr_folds, 
+    struct mf_problem const *prob,
+    mf_int nr_folds,
     struct mf_parameter param);
 
 mf_float mf_predict(struct mf_model const *model, mf_int u, mf_int v);
