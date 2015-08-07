@@ -441,21 +441,23 @@ inline void sg_update(
 class BlockBase
 {
 public:
-    virtual bool move_next() = 0;
-    virtual mf_node* get_current() = 0;
-    virtual void reset() = 0;
-    virtual ~BlockBase(){ };
+    virtual bool move_next() { return false; };
+    virtual mf_node* get_current() { return nullptr; }
+    virtual void attach() {}; // acquire resource and prepare the data for while-loop access
+    virtual void detach() {};  // release limited resource
+    virtual ~BlockBase() {};
 };
 
 class Block: public BlockBase
 {
 public:
-    Block(): first(nullptr), current(nullptr), last(nullptr){ }
-    Block(mf_node *first, mf_node *last): first(first-1), current(first-1), last(last){ }
-    ~Block(){ }
+    Block() : first(nullptr), current(nullptr), last(nullptr) { }
+    Block(mf_node *first, mf_node *last) : first(first-1), current(first-1), last(last) { }
+
     bool move_next() { return ++current != last; }
-    mf_node* get_current(){ return current; }
-    void reset(){ current = first; }
+    mf_node* get_current() { return current; }
+    void attach() { current = first; }
+    void deatch() { current = last-1; }
 private:
     mf_node *first;
     mf_node *current;
@@ -465,7 +467,6 @@ private:
 class BlockOnDisk: public BlockBase
 {
 public:
-    ~BlockOnDisk(){ source.close(); }
     bool move_next()
     {
         source.read((char*)&node.u, sizeof(mf_int));
@@ -473,27 +474,46 @@ public:
         source.read((char*)&node.r, sizeof(mf_float));
         return source.good();
     }
-    mf_node* get_current(){ return &node; }
-    void reset()
+    mf_node* get_current() { return &node; }
+    void tie_to(std::string filename) // prepare buffer file
     {
-        source.clear();
-        source.seekg(0);
+        if(filename.empty())
+            throw invalid_argument("file name can not be empty");
+        source_path = filename;
+        source.open(source_path, fstream::in|fstream::out|
+                fstream::trunc|fstream::binary);
+        if(!source)
+            throw invalid_argument(string("fail to open ")+source_path);
+        source.close();
     }
-    void tie_to(std::string filename)
+    void attach()
     {
         if(source.is_open())
             source.close();
-        source.open(filename, fstream::in|fstream::out|
-                fstream::trunc|fstream::binary);
+
+        source.open(source_path, fstream::in|fstream::out|
+                fstream::app|fstream::binary);
+        if(!source)
+            throw runtime_error(string("fail to open ")+source_path);
+        source.seekg(0);
+    }
+    void detach()
+    {
+        if(source.is_open())
+            source.close();
     }
     void append(mf_node &node)
     {
+        if(!source)
+            throw runtime_error(string("cannot access ")+source_path);
         source.write((char*)&node.u, sizeof(mf_int));
         source.write((char*)&node.v, sizeof(mf_int));
         source.write((char*)&node.r, sizeof(mf_float));
     }
+    bool is_detached() { return !source; }
 private:
     mf_node node;
+    string source_path;
     std::fstream source;
 };
 
@@ -514,6 +534,7 @@ void sg(vector<BlockBase*> &p_blocks, mf_model &model, Scheduler &sched,
     while(true)
     {
         mf_int bid = sched.get_job();
+        p_blocks[bid]->attach();
         __m128d XMMloss = _mm_setzero_pd();
         __m128d XMMerror = _mm_setzero_pd();
         while(p_blocks[bid]->move_next())
@@ -624,7 +645,7 @@ void sg(vector<BlockBase*> &p_blocks, mf_model &model, Scheduler &sched,
         mf_double error;
         _mm_store_sd(&loss, XMMloss);
         _mm_store_sd(&error, XMMerror);
-        p_blocks[bid]->reset();
+        p_blocks[bid]->detach();
         sched.put_job(bid, loss, error);
         if(sched.is_terminated())
             break;
@@ -640,6 +661,7 @@ void sg(vector<BlockBase*> &p_blocks, mf_model &model, Scheduler &sched,
     while(true)
     {
         mf_int bid = sched.get_job();
+        p_blocks[bid]->attach();
         __m128d XMMloss = _mm_setzero_pd();
         __m128d XMMerror = _mm_setzero_pd();
         while(p_blocks[bid]->move_next())
@@ -765,7 +787,7 @@ void sg(vector<BlockBase*> &p_blocks, mf_model &model, Scheduler &sched,
         mf_double error;
         _mm_store_sd(&loss, XMMloss);
         _mm_store_sd(&error, XMMerror);
-        p_blocks[bid]->reset();
+        p_blocks[bid]->detach();
         sched.put_job(bid, loss, error);
         if(sched.is_terminated())
             break;
@@ -776,6 +798,7 @@ void sg(vector<BlockBase*> &p_blocks, mf_model &model, Scheduler &sched,
     while(true)
     {
         mf_int bid = sched.get_job();
+        p_blocks[bid]->attach();
         mf_double loss = 0;
         mf_double error = 0;
         while(p_blocks[bid]->move_next())
@@ -871,7 +894,7 @@ void sg(vector<BlockBase*> &p_blocks, mf_model &model, Scheduler &sched,
                       z, rk_fast, param.do_nmf);
 
         }
-        p_blocks[bid]->reset();
+        p_blocks[bid]->detach();
         sched.put_job(bid, loss, error);
         if(sched.is_terminated())
             break;
@@ -969,7 +992,7 @@ void Utility::collect_info_on_disk(
     mf_double ex = 0;
     mf_double ex2 = 0;
 
-    ifstream source(data_path.c_str());
+    ifstream source(data_path);
     if(!source.is_open())
         throw runtime_error("cannot open " + data_path);
 
@@ -1254,7 +1277,7 @@ void Utility::grid_shuffle_scale_problem_on_disk(
 {
     vector<string> block_paths = get_block_paths(data_path, nr_bins);
     for(mf_int i = 0; i < nr_bins*nr_bins; i++)
-        blocks[i].tie_to(block_paths[i].c_str());
+        blocks[i].tie_to(block_paths[i]);
 
     mf_int seg_p = (mf_int)ceil((double)m/nr_bins);
     mf_int seg_q = (mf_int)ceil((double)n/nr_bins);
@@ -1264,34 +1287,54 @@ void Utility::grid_shuffle_scale_problem_on_disk(
         return (u/seg_p)*nr_bins+v/seg_q;
     };
 
-    fstream data(data_path.c_str());
-    if(!data)
-        cerr << "fail to open file " << data_path << endl;
-    for(mf_node N; data >> N.u >> N.v >> N.r;)
+    ifstream source(data_path);
+    if(!source)
+        throw runtime_error(string("fail to open file ")+data_path);
+
+    queue<mf_int> active_blocks;
+    for(mf_node N; source >> N.u >> N.v >> N.r;)
     {
         N.u = p_map[N.u];
         N.v = q_map[N.v];
         N.r /= scale;
 
         mf_int bid = get_block_id(N.u, N.v);
+
+        if(active_blocks.size() > 63 && blocks[bid].is_detached())
+        {
+            blocks[active_blocks.front()].detach();
+            active_blocks.pop();
+            blocks[bid].attach();
+            active_blocks.push(bid);
+        }
+        else if(blocks[bid].is_detached())
+        {
+            blocks[bid].attach();
+            active_blocks.push(bid);
+        }
+
         blocks[bid].append(N);
         omega_p[N.u]++;
         omega_q[N.v]++;
     }
     for(mf_int i = 0; i < nr_bins*nr_bins; i++)
-        blocks[i].reset();
-    data.close();
+        if(!blocks[i].is_detached())
+            blocks[i].detach();
+    source.close();
 
     for(mf_int i = 0; i < nr_bins*nr_bins; i++)
     {
         vector<mf_node> nodes;
+
+        blocks[i].attach();
         while(blocks[i].move_next())
         {
             mf_node *N = blocks[i].get_current();
             nodes.push_back(*N);
         }
-        blocks[i].reset();
+        blocks[i].detach();
 
+        blocks[i].attach();
         if(m > n)
             sort(nodes.begin(), nodes.end(), sort_node_by_p());
         else
@@ -1299,7 +1342,7 @@ void Utility::grid_shuffle_scale_problem_on_disk(
 
         for(mf_int j = 0; j < (mf_long)nodes.size(); j++)
             blocks[i].append(nodes[j]);
-        blocks[i].reset();
+        blocks[i].detach();
     }
 }
 
@@ -1451,20 +1494,11 @@ vector<string> Utility::get_block_paths(string data_path, mf_int nr_bins)
 
     dirname += string(".blocks.")+num_to_str(nr_bins*nr_bins);
 
-    try
-    {
 #ifdef _WIN32
-        if(_mkdir(dirname.c_str()) != 0)
+    _mkdir(dirname.c_str());
 #else
-        if(mkdir(dirname.c_str(), 0755) != 0)
+    mkdir(dirname.c_str(), 0755);
 #endif
-        throw runtime_error(string("problem creating directory ")+dirname);
-    }
-    catch(runtime_error const &e)
-    {
-        cerr << e.what() << endl;
-        throw;
-    }
 
     vector<string> block_paths(nr_bins*nr_bins);
     for(mf_int i = 0; i < nr_bins*nr_bins; i++)
@@ -1654,11 +1688,13 @@ shared_ptr<mf_model> fpsg(
     vector<mf_int> cv_blocks=vector<mf_int>(),
     mf_double *cv_error=nullptr)
 {
+    shared_ptr<mf_model> model;
+try
+{
     Utility util(param.solver, param.nr_threads);
     Scheduler sched(param.nr_bins, param.nr_threads, cv_blocks);
     shared_ptr<mf_problem> tr;
     shared_ptr<mf_problem> va;
-    shared_ptr<mf_model> model;
     vector<Block> blocks(param.nr_bins*param.nr_bins);
     vector<BlockBase*> block_ptrs(param.nr_bins*param.nr_bins);
     vector<mf_node*> ptrs;
@@ -1751,7 +1787,12 @@ shared_ptr<mf_model> fpsg(
         util.shuffle_problem(*tr, inv_p_map, inv_q_map);
         util.shuffle_problem(*va, inv_p_map, inv_q_map);
     }
-
+}
+catch(exception const &e)
+{
+    cerr << e.what() << endl;
+    throw;
+}
     return model;
 }
 
@@ -1760,11 +1801,13 @@ shared_ptr<mf_model> fpsg_on_disk(
     const string va_path,
     mf_parameter param)
 {
+    shared_ptr<mf_model> model;
+try
+{
     Utility util(param.solver, param.nr_threads);
     Scheduler sched(param.nr_bins, param.nr_threads, vector<mf_int>());
     mf_problem tr = {};
     mf_problem va = read_problem(va_path.c_str());
-    shared_ptr<mf_model> model;
     vector<BlockOnDisk> blocks(param.nr_bins*param.nr_bins);
     vector<BlockBase*> block_ptrs(param.nr_bins*param.nr_bins);
     vector<mf_int> p_map;
@@ -1805,7 +1848,12 @@ shared_ptr<mf_model> fpsg_on_disk(
             inv_p_map, inv_q_map, omega_p, omega_q, model);
 
     delete [] va.R;
-
+}
+catch(exception const &e)
+{
+    cerr << e.what() << endl;
+    throw;
+}
     return model;
 }
 
