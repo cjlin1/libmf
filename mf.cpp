@@ -1492,7 +1492,7 @@ vector<string> Utility::get_block_paths(string data_path, mf_int nr_bins)
         return buf.str();
     };
 
-    dirname += string(".blocks.")+num_to_str(nr_bins*nr_bins);
+    dirname += string(".")+num_to_str(nr_bins*nr_bins);
 
 #ifdef _WIN32
     _mkdir(dirname.c_str());
@@ -1502,7 +1502,7 @@ vector<string> Utility::get_block_paths(string data_path, mf_int nr_bins)
 
     vector<string> block_paths(nr_bins*nr_bins);
     for(mf_int i = 0; i < nr_bins*nr_bins; i++)
-        block_paths[i] = dirname+string("/block")+num_to_str(i);
+        block_paths[i] = dirname+string("/")+num_to_str(nr_bins*nr_bins)+string("_")+num_to_str(i)+string(".bin");
 
     return block_paths;
 }
