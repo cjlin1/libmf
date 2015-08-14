@@ -2268,7 +2268,7 @@ void fpsg_core(
     vector<thread> threads;
     for(mf_int i = 0; i < param.nr_threads; i++)
     {
-        shared_ptr<SolverBase> solver = SolverFactory::get_solver(ref(sched), ref(block_ptrs[i]), PG.data(), QG.data(), ref(*model), param, ref(slow_only)); // is ref necessary?
+        shared_ptr<SolverBase> solver = SolverFactory::get_solver(sched, block_ptrs[i], PG.data(), QG.data(), *model, param, slow_only);
         threads.emplace_back(&SolverBase::run, solver);
     }
 

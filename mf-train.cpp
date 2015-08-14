@@ -16,11 +16,11 @@ using namespace mf;
 
 struct Option
 {
-    Option() : param(mf_get_default_param()), nr_folds(1), disk(false), do_cv(false) {}
+    Option() : param(mf_get_default_param()), nr_folds(1), on_disk(false), do_cv(false) {}
     string tr_path, va_path, model_path;
     mf_parameter param;
     mf_int nr_folds;
-    bool disk;
+    bool on_disk;
     bool do_cv;
 };
 
@@ -217,7 +217,7 @@ Option parse_option(int argc, char **argv)
         }
         else if(args[i].compare("--disk") == 0)
         {
-            option.disk = true;
+            option.on_disk = true;
         }
         else
         {
@@ -228,7 +228,7 @@ Option parse_option(int argc, char **argv)
     if(option.nr_folds > 1 && !option.va_path.empty())
         throw invalid_argument("cannot specify both -p and -v");
 
-    if(option.nr_folds > 1 && option.disk)
+    if(option.nr_folds > 1 && option.on_disk)
         throw invalid_argument("cannot specify both -v and --disk");
 
     if(i >= argc)
@@ -275,7 +275,7 @@ int main(int argc, char **argv)
 
     mf_problem tr = {};
     mf_problem va = {};
-    if(option.disk != true)
+    if(!option.on_disk)
     {
         try
         {
@@ -296,7 +296,7 @@ int main(int argc, char **argv)
     else
     {
         mf_model *model;
-        if(option.disk != true)
+        if(!option.on_disk)
             model = mf_train_with_validation(&tr, &va, option.param);
         else
             model = mf_train_with_validation_on_disk(option.tr_path.c_str(),
@@ -306,7 +306,7 @@ int main(int argc, char **argv)
         // use the following function if you do not have a validation set
 
         // mf_model model =
-        //     mf_train_with_validation(&tr, option.fpsg_command.c_str());
+        //     mf_train_with_validation(&tr, option.param);
 
         mf_int status = mf_save_model(model, option.model_path.c_str());
 
@@ -314,7 +314,7 @@ int main(int argc, char **argv)
         {
             cout << "cannot save model to " << option.model_path << endl;
 
-            if(option.disk != true)
+            if(!option.on_disk)
             {
                 delete[] tr.R;
                 delete[] va.R;
@@ -327,7 +327,7 @@ int main(int argc, char **argv)
         mf_destroy_model(&model);
     }
 
-    if(option.disk != true)
+    if(!option.on_disk)
     {
         delete[] tr.R;
         delete[] va.R;
