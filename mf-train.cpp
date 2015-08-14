@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <cstring>
 #include <cstdlib>
@@ -50,9 +51,22 @@ string train_help()
 "-s <threads>: set number of threads (default 12)\n"
 "-p <path>: set path to the validation set\n"
 "-v <fold>: set number of folds for cross validation\n"
+"-n <blocks>: set number of blocks\n"
 "--quiet: quiet mode (no outputs)\n"
 "--nmf: perform non-negative matrix factorization\n"
-"--disk <blocks>: do disk-level training using file buffers\n");
+"--disk: use disk to store blocks for training\n");
+}
+
+bool is_numerical(char *str)
+{
+    int c = 0;
+    while(*str != '\0')
+    {
+        if(isdigit(*str))
+            c++;
+        str++;
+    }
+    return c > 0;
 }
 
 Option parse_option(int argc, char **argv)
@@ -76,11 +90,15 @@ Option parse_option(int argc, char **argv)
             i++;
 
             char *pch = strtok(argv[i], ",");
+            if(!is_numerical(pch))
+                throw invalid_argument("regularization coefficient should be a number");
             option.param.lambda_p1 = (mf_float)strtod(pch, NULL);
             option.param.lambda_q1 = (mf_float)strtod(pch, NULL);
             pch = strtok(NULL, ",");
             if(pch != NULL)
             {
+                if(!is_numerical(pch))
+                    throw invalid_argument("regularization coefficient should be a number");
                 option.param.lambda_q1 = (mf_float)strtod(pch, NULL);
             }
         }
@@ -91,11 +109,15 @@ Option parse_option(int argc, char **argv)
             i++;
 
             char *pch = strtok(argv[i], ",");
+            if(!is_numerical(pch))
+                throw invalid_argument("regularization coefficient should be a number");
             option.param.lambda_p2 = (mf_float)strtod(pch, NULL);
             option.param.lambda_q2 = (mf_float)strtod(pch, NULL);
             pch = strtok(NULL, ",");
             if(pch != NULL)
             {
+                if(!is_numerical(pch))
+                    throw invalid_argument("regularization coefficient should be a number");
                 option.param.lambda_q2 = (mf_float)strtod(pch, NULL);
             }
         }
@@ -104,6 +126,9 @@ Option parse_option(int argc, char **argv)
             if((i+1) >= argc)
                 throw invalid_argument("need to specify number of factors after -k");
             i++;
+
+            if(!is_numerical(argv[i]))
+                throw invalid_argument("-k should be followed by a number");
             option.param.k = atoi(argv[i]);
         }
         else if(args[i].compare("-t") == 0)
@@ -111,6 +136,9 @@ Option parse_option(int argc, char **argv)
             if((i+1) >= argc)
                 throw invalid_argument("need to specify number of iterations after -t");
             i++;
+
+            if(!is_numerical(argv[i]))
+                throw invalid_argument("-i should be followed by a number");
             option.param.nr_iters = atoi(argv[i]);
         }
         else if(args[i].compare("-r") == 0)
@@ -118,6 +146,9 @@ Option parse_option(int argc, char **argv)
             if((i+1) >= argc)
                 throw invalid_argument("need to specify eta after -r");
             i++;
+
+            if(!is_numerical(argv[i]))
+                throw invalid_argument("-r should be followed by a number");
             option.param.eta = (mf_float)atof(argv[i]);
         }
         else if(args[i].compare("-s") == 0)
@@ -125,6 +156,9 @@ Option parse_option(int argc, char **argv)
             if((i+1) >= argc)
                 throw invalid_argument("need to specify number of threads after -s");
             i++;
+
+            if(!is_numerical(argv[i]))
+                throw invalid_argument("-s should be followed by a number");
             option.param.nr_threads = atoi(argv[i]);
         }
         else if(args[i].compare("-p") == 0)
@@ -132,6 +166,7 @@ Option parse_option(int argc, char **argv)
             if(i == argc-1)
                 throw invalid_argument("need to specify path after -p");
             i++;
+
             option.va_path = string(args[i]);
         }
         else if(args[i].compare("-v") == 0)
@@ -139,9 +174,13 @@ Option parse_option(int argc, char **argv)
             if(i == argc-1)
                 throw invalid_argument("need to specify number of folds after -v");
             i++;
+
+            if(!is_numerical(argv[i]))
+                throw invalid_argument("-v should be followed by a number");
             option.nr_folds = atoi(argv[i]);
-            if(option.nr_folds < 1)
-                throw invalid_argument("number of folds must be grater than one");
+
+            if(option.nr_folds < 2)
+                throw invalid_argument("number of folds must be greater than one");
             option.do_cv = true;
         }
         else if(args[i].compare("-x") == 0)
@@ -149,7 +188,24 @@ Option parse_option(int argc, char **argv)
             if(i == argc-1)
                 throw invalid_argument("need to specify the type of solver after -x");
             i++;
+
+            if(!is_numerical(argv[i]))
+                throw invalid_argument("-x should be followed by a number");
             option.param.solver = atoi(argv[i]);
+        }
+        else if(args[i].compare("-n") == 0)
+        {
+            if(i == argc-1)
+                throw invalid_argument("need to specify the number of blocks after -n");
+            i++;
+
+            if(!is_numerical(argv[i]))
+                throw invalid_argument("-n should be followed by a number");
+            mf_int nr_blocks = atoi(argv[i]);
+
+            if(nr_blocks < 1)
+                throw invalid_argument("number of blocks must be positive");
+            option.param.nr_bins = (mf_int)ceil(sqrt(nr_blocks));
         }
         else if(args[i].compare("--nmf") == 0)
         {
@@ -161,12 +217,7 @@ Option parse_option(int argc, char **argv)
         }
         else if(args[i].compare("--disk") == 0)
         {
-            if(i == argc-1)
-                throw invalid_argument("need to specify the number of block files after --disk");
             option.disk = true;
-            i++;
-            mf_int nr_blocks = atoi(argv[i]);
-            option.param.nr_bins = (mf_int)ceil(sqrt(nr_blocks));
         }
         else
         {

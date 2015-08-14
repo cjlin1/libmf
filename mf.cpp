@@ -289,78 +289,67 @@ class BlockBase
 public:
     virtual bool move_next() { return false; };
     virtual mf_node* get_current() { return nullptr; }
-    virtual void attach() {}; // acquire resource and prepare the data for while-loop access
-    virtual void detach() {};  // release limited resource
+    virtual void reload(mf_int) {};
     virtual ~BlockBase() {};
 };
 
-class Block: public BlockBase
+class Block final: public BlockBase
 {
 public:
-    Block() : first(nullptr), current(nullptr), last(nullptr) { }
-    Block(mf_node *first, mf_node *last) : first(first-1), current(first-1), last(last) { }
-
     bool move_next() { return ++current != last; }
     mf_node* get_current() { return current; }
-    void attach() { current = first; }
-    void deatch() { current = last-1; }
+    void tie_to(vector<mf_node*> block_ptrs_) { block_ptrs = block_ptrs_; }
+    void reload(mf_int block_idx)
+    {
+        first = block_ptrs[block_idx]-1;
+        last = block_ptrs[block_idx+1];
+        current = first;
+    }
 private:
-    mf_node *first;
-    mf_node *current;
-    mf_node *last;
+    mf_node* first;
+    mf_node* last;
+    mf_node* current;
+    vector<mf_node*> block_ptrs;
 };
 
-class BlockOnDisk: public BlockBase
+class BlockOnDisk final: public BlockBase
 {
 public:
-    bool move_next()
+    bool move_next() { return ++current < last-first; }
+    mf_node* get_current() { return &memory[current]; }
+    void tie_to(std::string filename, vector<mf_long> block_ptrs_)
     {
-        source.read((char*)&node.u, sizeof(mf_int));
-        source.read((char*)&node.v, sizeof(mf_int));
-        source.read((char*)&node.r, sizeof(mf_float));
-        return source.good();
+        buffer.open(filename, fstream::in|fstream::binary);
+        if(!buffer)
+            throw ios::failure(string("cannot tie to ")+filename);
+        block_ptrs = block_ptrs_;
     }
-    mf_node* get_current() { return &node; }
-    void tie_to(std::string filename) // prepare buffer file
+    void reload(mf_int block_idx)
     {
-        if(filename.empty())
-            throw invalid_argument("file name can not be empty");
-        source_path = filename;
-        source.open(source_path, fstream::in|fstream::out|
-                fstream::trunc|fstream::binary);
-        if(!source)
-            throw invalid_argument(string("fail to open ")+source_path);
-        source.close();
-    }
-    void attach()
-    {
-        if(source.is_open())
-            source.close();
+        if(block_ptrs[block_idx] < 0 || block_ptrs[block_idx+1] < 0)
+            throw invalid_argument("index cannot be negative");
+        if(block_ptrs[block_idx] > block_ptrs[block_idx+1])
+            throw invalid_argument("first index must be smaller than or equal to last index");
 
-        source.open(source_path, fstream::in|fstream::out|
-                fstream::app|fstream::binary);
-        if(!source)
-            throw runtime_error(string("fail to open ")+source_path);
-        source.seekg(0);
+        first = block_ptrs[block_idx];
+        last = block_ptrs[block_idx+1];
+        current = -1;
+
+        memory.resize(last-first);
+        buffer.clear();
+        buffer.seekg(first*sizeof(mf_node));
+        buffer.read((char*)memory.data(), sizeof(mf_node)*(last-first));
+
+        if(!buffer)
+            throw ios::failure("cannot load block into memory");
     }
-    void detach()
-    {
-        if(source.is_open())
-            source.close();
-    }
-    void append(mf_node &node)
-    {
-        if(!source)
-            throw runtime_error(string("cannot access ")+source_path);
-        source.write((char*)&node.u, sizeof(mf_int));
-        source.write((char*)&node.v, sizeof(mf_int));
-        source.write((char*)&node.r, sizeof(mf_float));
-    }
-    bool is_detached() { return !source; }
 private:
-    mf_node node;
-    string source_path;
-    std::fstream source;
+    mf_long first;
+    mf_long last;
+    mf_long current;
+    vector<mf_long> block_ptrs;
+    vector<mf_node> memory;
+    ifstream buffer;
 };
 
 struct sort_node_by_p
@@ -385,22 +374,24 @@ public:
     Utility(mf_int s, mf_int n) : solver(s), nr_threads(n) {};
     void collect_info(mf_problem &prob, mf_float &avg, mf_float &std_dev);
     void collect_info_on_disk(string data_path, mf_problem &prob,
-                      mf_float &avg, mf_float &std_dev);
+                              mf_float &avg, mf_float &std_dev);
     void shuffle_problem(mf_problem &prob, vector<mf_int> &p_map,
                          vector<mf_int> &q_map);
-    vector<mf_node*> grid_problem(mf_problem &prob, mf_int nr_bins,
-                                  vector<mf_int> &omega_p,
-                                  vector<mf_int> &omega_q);
+    vector<mf_node*> grid_problem(
+        mf_problem &prob, mf_int nr_bins,
+        vector<mf_int> &omega_p, vector<mf_int> &omega_q,
+        vector<Block> &blocks);
     void grid_shuffle_scale_problem_on_disk(
-        mf_int m, mf_int n, mf_int nr_bins, mf_float scale,
-        string data_path, vector<BlockOnDisk> &blocks,
+        mf_int m, mf_int n, mf_int nr_bins,
+        mf_float scale, string data_path,
         vector<mf_int> &p_map, vector<mf_int> &q_map,
-        vector<mf_int> &omega_p, vector<mf_int> &omega_q);
+        vector<mf_int> &omega_p, vector<mf_int> &omega_q,
+        vector<BlockOnDisk> &blocks);
     void scale_problem(mf_problem &prob, mf_float scale);
     mf_double calc_reg1(mf_model &model, mf_float lambda_p, mf_float lambda_q,
-            vector<mf_int> &omega_p, vector<mf_int> &omega_q);
+                        vector<mf_int> &omega_p, vector<mf_int> &omega_q);
     mf_double calc_reg2(mf_model &model, mf_float lambda_p, mf_float lambda_q,
-            vector<mf_int> &omega_p, vector<mf_int> &omega_q);
+                        vector<mf_int> &omega_p, vector<mf_int> &omega_q);
     string get_error_legend();
     mf_double calc_error(mf_node const *R, mf_long const size, mf_model const &model);
     void scale_model(mf_model &model, mf_float scale);
@@ -665,7 +656,8 @@ vector<mf_node*> Utility::grid_problem(
     mf_problem &prob,
     mf_int nr_bins,
     vector<mf_int> &omega_p,
-    vector<mf_int> &omega_q)
+    vector<mf_int> &omega_q,
+    vector<Block> &blocks)
 {
     vector<mf_long> counts(nr_bins*nr_bins, 0);
 
@@ -721,90 +713,85 @@ vector<mf_node*> Utility::grid_problem(
             sort(ptrs[block], ptrs[block+1], sort_node_by_q());
     }
 
+    for(mf_int i = 0; i < (mf_long)blocks.size(); i++)
+        blocks[i].tie_to(ptrs);
+
     return ptrs;
 }
 
 void Utility::grid_shuffle_scale_problem_on_disk(
-    mf_int m,
-    mf_int n,
-    mf_int nr_bins,
-    mf_float scale,
-    string data_path,
-    vector<BlockOnDisk> &blocks,
-    vector<mf_int> &p_map,
-    vector<mf_int> &q_map,
-    vector<mf_int> &omega_p,
-    vector<mf_int> &omega_q)
+    mf_int m, mf_int n, mf_int nr_bins,
+    mf_float scale, string data_path,
+    vector<mf_int> &p_map, vector<mf_int> &q_map,
+    vector<mf_int> &omega_p, vector<mf_int> &omega_q,
+    vector<BlockOnDisk> &blocks)
 {
-    vector<string> block_paths = get_block_paths(data_path, nr_bins);
-    for(mf_int i = 0; i < nr_bins*nr_bins; i++)
-        blocks[i].tie_to(block_paths[i]);
-
+    string const buffer_path = data_path+string(".disk");
     mf_int seg_p = (mf_int)ceil((double)m/nr_bins);
     mf_int seg_q = (mf_int)ceil((double)n/nr_bins);
-
+    vector<mf_long> counts(nr_bins*nr_bins+1, 0);
+    vector<mf_long> pivots(nr_bins*nr_bins, 0);
+    ifstream source(data_path);
+    fstream buffer(buffer_path, fstream::in|fstream::out|
+                   fstream::binary|fstream::trunc);
     auto get_block_id = [=] (mf_int u, mf_int v)
     {
         return (u/seg_p)*nr_bins+v/seg_q;
     };
 
-    ifstream source(data_path);
     if(!source)
-        throw runtime_error(string("fail to open file ")+data_path);
+        throw ios::failure(string("cannot to open ")+data_path);
+    if(!buffer)
+        throw ios::failure(string("cannot to open ")+buffer_path);
 
-    queue<mf_int> active_blocks;
+    for(mf_node N; source >> N.u >> N.v >> N.r;)
+    {
+        N.u = p_map[N.u];
+        N.v = q_map[N.v];
+        mf_int bid = get_block_id(N.u, N.v);
+        omega_p[N.u]++;
+        omega_q[N.v]++;
+        counts[bid+1]++;
+    }
+
+    for(mf_int i = 1; i < nr_bins*nr_bins+1; i++)
+    {
+        counts[i] += counts[i-1];
+        pivots[i-1] = counts[i-1];
+    }
+
+    source.clear();
+    source.seekg(0);
     for(mf_node N; source >> N.u >> N.v >> N.r;)
     {
         N.u = p_map[N.u];
         N.v = q_map[N.v];
         N.r /= scale;
-
         mf_int bid = get_block_id(N.u, N.v);
-
-        if(active_blocks.size() > 63 && blocks[bid].is_detached())
-        {
-            blocks[active_blocks.front()].detach();
-            active_blocks.pop();
-            blocks[bid].attach();
-            active_blocks.push(bid);
-        }
-        else if(blocks[bid].is_detached())
-        {
-            blocks[bid].attach();
-            active_blocks.push(bid);
-        }
-
-        blocks[bid].append(N);
-        omega_p[N.u]++;
-        omega_q[N.v]++;
+        buffer.seekp(pivots[bid]*sizeof(mf_node));
+        buffer.write((char*)&N, sizeof(mf_node));
+        pivots[bid]++;
     }
-    for(mf_int i = 0; i < nr_bins*nr_bins; i++)
-        if(!blocks[i].is_detached())
-            blocks[i].detach();
-    source.close();
 
     for(mf_int i = 0; i < nr_bins*nr_bins; i++)
     {
-        vector<mf_node> nodes;
+        vector<mf_node> nodes(counts[i+1]-counts[i]);
+        buffer.clear();
+        buffer.seekg(counts[i]*sizeof(mf_node));
+        buffer.read((char*)nodes.data(), sizeof(mf_node)*nodes.size());
 
-        blocks[i].attach();
-        while(blocks[i].move_next())
-        {
-            mf_node *N = blocks[i].get_current();
-            nodes.push_back(*N);
-        }
-        blocks[i].detach();
-
-        blocks[i].attach();
         if(m > n)
             sort(nodes.begin(), nodes.end(), sort_node_by_p());
         else
             sort(nodes.begin(), nodes.end(), sort_node_by_q());
 
-        for(mf_int j = 0; j < (mf_long)nodes.size(); j++)
-            blocks[i].append(nodes[j]);
-        blocks[i].detach();
+        buffer.clear();
+        buffer.seekp(counts[i]*sizeof(mf_node));
+        buffer.write((char*)nodes.data(), sizeof(mf_node)*nodes.size());
     }
+
+    for(mf_int i = 0; i < (mf_long)blocks.size(); i++)
+        blocks[i].tie_to(buffer_path, counts);
 }
 
 mf_float* Utility::malloc_aligned_float(mf_long size)
@@ -1010,21 +997,20 @@ mf_problem* Utility::copy_problem(mf_problem const *prob, bool copy_data)
 class SolverBase
 {
 public:
-    SolverBase(Scheduler &scheduler, vector<BlockBase*> &blocks,
+    SolverBase(Scheduler &scheduler, BlockBase* blocks,
         mf_float *PG, mf_float *QG, mf_model &model, mf_parameter param,
         bool &slow_only);
     virtual ~SolverBase();
     void run();
 protected:
     Scheduler &scheduler;
-    vector<BlockBase*> &blocks;
+    BlockBase *block;
     mf_float *PG;
     mf_float *QG;
     mf_model &model;
     mf_parameter param;
     bool &slow_only;
 
-    BlockBase *block;
     mf_node *N;
     mf_float z;
     mf_double loss;
@@ -1072,10 +1058,10 @@ protected:
 #endif
 };
 
-inline SolverBase::SolverBase(Scheduler &scheduler, vector<BlockBase*> &blocks,
+inline SolverBase::SolverBase(Scheduler &scheduler, BlockBase* block,
         mf_float *PG, mf_float *QG, mf_model &model, mf_parameter param,
         bool &slow_only):
-        scheduler(scheduler), blocks(blocks), PG(PG), QG(QG), model(model),
+        scheduler(scheduler), block(block), PG(PG), QG(QG), model(model),
         param(param), slow_only(slow_only)
 {
 #if defined USEAVX
@@ -1160,8 +1146,7 @@ inline void SolverBase::initialize()
     XMMloss = _mm_setzero_pd();
     XMMerror = _mm_setzero_pd();
     bid = scheduler.get_job();
-    block = blocks[bid];
-    block->attach();
+    block->reload(bid);
 }
 
 inline void SolverBase::prepare()
@@ -1177,7 +1162,6 @@ inline void SolverBase::finalize()
 {
     _mm_store_sd(&loss, XMMloss);
     _mm_store_sd(&error, XMMerror);
-    block->detach();
     scheduler.put_job(bid, loss, error);
 }
 
@@ -1192,8 +1176,7 @@ inline void SolverBase::initialize()
     XMMloss = _mm_setzero_pd();
     XMMerror = _mm_setzero_pd();
     bid = scheduler.get_job();
-    block = blocks[bid];
-    block->attach();
+    block->reload(bid);
 }
 
 inline void SolverBase::prepare()
@@ -1209,7 +1192,6 @@ inline void SolverBase::finalize()
 {
     _mm_store_sd(&loss, XMMloss);
     _mm_store_sd(&error, XMMerror);
-    block->detach();
     scheduler.put_job(bid, loss, error);
 }
 
@@ -1234,8 +1216,7 @@ inline void SolverBase::initialize()
     lambda_p2 = param.lambda_p2;
     lambda_q2 = param.lambda_q2;
     bid = scheduler.get_job();
-    block = blocks[bid];
-    block->attach();
+    block->reload(bid);
 }
 
 inline void SolverBase::prepare()
@@ -1249,7 +1230,6 @@ inline void SolverBase::prepare()
 inline void SolverBase::finalize()
 {
     scheduler.put_job(bid, loss, error);
-    block->detach();
 }
 #endif
 
@@ -1260,10 +1240,10 @@ inline void SolverBase::finalize()
 class MFSolver: public SolverBase
 {
 public:
-    MFSolver(Scheduler &scheduler, vector<BlockBase*> &blocks,
+    MFSolver(Scheduler &scheduler, BlockBase *block,
         mf_float *PG, mf_float *QG, mf_model &model, mf_parameter param,
         bool &slow_only):
-        SolverBase(scheduler, blocks, PG, QG, model, param, slow_only){}
+        SolverBase(scheduler, block, PG, QG, model, param, slow_only){}
 protected:
     void sg_update(mf_int d_begin, mf_int d_end); 
 };
@@ -1456,10 +1436,10 @@ inline void MFSolver::sg_update(mf_int d_begin, mf_int d_end)
 class L2_MFR:public MFSolver
 {
 public:
-    L2_MFR(Scheduler &scheduler, vector<BlockBase*> &blocks,
+    L2_MFR(Scheduler &scheduler, BlockBase* block,
         mf_float *PG, mf_float *QG, mf_model &model, mf_parameter param,
         bool &slow_only):
-        MFSolver(scheduler, blocks, PG, QG, model, param, slow_only){}
+        MFSolver(scheduler, block, PG, QG, model, param, slow_only){}
 protected:
     void prepare();
 };
@@ -1501,10 +1481,10 @@ inline void L2_MFR::prepare()
 class L1_MFR:public MFSolver
 {
 public:
-    L1_MFR(Scheduler &scheduler, vector<BlockBase*> &blocks,
+    L1_MFR(Scheduler &scheduler, BlockBase* block,
         mf_float *PG, mf_float *QG, mf_model &model, mf_parameter param,
         bool &slow_only):
-        MFSolver(scheduler, blocks, PG, QG, model, param, slow_only){}
+        MFSolver(scheduler, block, PG, QG, model, param, slow_only){}
 protected:
     void prepare();
 };
@@ -1561,10 +1541,10 @@ inline void L1_MFR::prepare()
 class LR_MFC:public MFSolver
 {
 public:
-    LR_MFC(Scheduler &scheduler, vector<BlockBase*> &blocks,
+    LR_MFC(Scheduler &scheduler, BlockBase* block,
         mf_float *PG, mf_float *QG, mf_model &model, mf_parameter param,
         bool &slow_only):
-        MFSolver(scheduler, blocks, PG, QG, model, param, slow_only){}
+        MFSolver(scheduler, block, PG, QG, model, param, slow_only){}
 protected:
     void prepare();
 };
@@ -1635,10 +1615,10 @@ inline void LR_MFC::prepare()
 class L2_MFC:public MFSolver
 {
 public:
-    L2_MFC(Scheduler &scheduler, vector<BlockBase*> &blocks,
+    L2_MFC(Scheduler &scheduler, BlockBase* block,
         mf_float *PG, mf_float *QG, mf_model &model, mf_parameter param,
         bool &slow_only):
-        MFSolver(scheduler, blocks, PG, QG, model, param, slow_only){}
+        MFSolver(scheduler, block, PG, QG, model, param, slow_only){}
 protected:
     void prepare();
 };
@@ -1716,10 +1696,10 @@ inline void L2_MFC::prepare()
 class L1_MFC:public MFSolver
 {
 public:
-    L1_MFC(Scheduler &scheduler, vector<BlockBase*> &blocks,
+    L1_MFC(Scheduler &scheduler, BlockBase* block,
         mf_float *PG, mf_float *QG, mf_model &model, mf_parameter param,
         bool &slow_only):
-        MFSolver(scheduler, blocks, PG, QG, model, param, slow_only){}
+        MFSolver(scheduler, block, PG, QG, model, param, slow_only){}
 protected:
     void prepare();
 };
@@ -1802,10 +1782,10 @@ inline void L1_MFC::prepare()
 class BPRSolver: public SolverBase
 {
 public:
-    BPRSolver(Scheduler &scheduler, vector<BlockBase*> &blocks,
+    BPRSolver(Scheduler &scheduler, BlockBase* block,
         mf_float *PG, mf_float *QG, mf_model &model, mf_parameter param,
         bool &slow_only, bool is_column_oriented):
-        SolverBase(scheduler, blocks, PG, QG, model, param, slow_only),
+        SolverBase(scheduler, block, PG, QG, model, param, slow_only),
         is_column_oriented(is_column_oriented){}
 
 protected:
@@ -2118,10 +2098,10 @@ inline void BPRSolver::prepare()
 class COL_BPR_MFOC:public BPRSolver
 {
 public:
-    COL_BPR_MFOC(Scheduler &scheduler, vector<BlockBase*> &blocks,
+    COL_BPR_MFOC(Scheduler &scheduler, BlockBase* block,
         mf_float *PG, mf_float *QG, mf_model &model, mf_parameter param,
         bool &slow_only, bool is_column_oriented=true):
-        BPRSolver(scheduler, blocks, PG, QG,
+        BPRSolver(scheduler, block, PG, QG,
                 model, param, slow_only, is_column_oriented){}
 protected:
     void prepare();
@@ -2169,10 +2149,10 @@ inline void COL_BPR_MFOC::prepare()
 class ROW_BPR_MFOC:public BPRSolver
 {
 public:
-    ROW_BPR_MFOC(Scheduler &scheduler, vector<BlockBase*> &blocks,
+    ROW_BPR_MFOC(Scheduler &scheduler, BlockBase* block,
         mf_float *PG, mf_float *QG, mf_model &model, mf_parameter param,
         bool &slow_only, bool is_column_oriented=false):
-        BPRSolver(scheduler, blocks, PG, QG, model, param,
+        BPRSolver(scheduler, block, PG, QG, model, param,
                 slow_only, is_column_oriented){}
 protected:
     void prepare();
@@ -2189,11 +2169,11 @@ inline void ROW_BPR_MFOC::prepare()
 class SolverFactory
 {
 public:
-    static shared_ptr<SolverBase> get_solver(Scheduler &scheduler, vector<BlockBase*> &blocks,
+    static shared_ptr<SolverBase> get_solver(Scheduler &scheduler, BlockBase* block,
             mf_float *PG, mf_float *QG, mf_model &model, mf_parameter param, bool &slow_only);
 };
 
-shared_ptr<SolverBase> SolverFactory::get_solver(Scheduler &scheduler, vector<BlockBase*> &blocks,
+shared_ptr<SolverBase> SolverFactory::get_solver(Scheduler &scheduler, BlockBase* block,
         mf_float *PG, mf_float *QG, mf_model &model, mf_parameter param, bool &slow_only)
 {
     shared_ptr<SolverBase> solver;
@@ -2201,32 +2181,32 @@ shared_ptr<SolverBase> SolverFactory::get_solver(Scheduler &scheduler, vector<Bl
     switch(param.solver)
     {
         case P_L2_MFR:
-            solver = shared_ptr<SolverBase>(new L2_MFR(scheduler, blocks,
+            solver = shared_ptr<SolverBase>(new L2_MFR(scheduler, block,
                         PG, QG, model, param, slow_only));
             break;
         case P_L1_MFR:
-            solver = shared_ptr<SolverBase>(new L1_MFR(scheduler, blocks,
+            solver = shared_ptr<SolverBase>(new L1_MFR(scheduler, block,
                         PG, QG, model, param, slow_only));
             break;
         case P_LR_MFC:
-            solver = shared_ptr<SolverBase>(new LR_MFC(scheduler, blocks,
+            solver = shared_ptr<SolverBase>(new LR_MFC(scheduler, block,
                         PG, QG, model, param, slow_only));
             break;
         case P_L2_MFC:
-            solver = shared_ptr<SolverBase>(new L2_MFC(scheduler, blocks,
+            solver = shared_ptr<SolverBase>(new L2_MFC(scheduler, block,
                         PG, QG, model, param, slow_only));
             break;
         case P_L1_MFC:
-            solver = shared_ptr<SolverBase>(new L1_MFC(scheduler, blocks,
+            solver = shared_ptr<SolverBase>(new L1_MFC(scheduler, block,
                         PG, QG, model, param, slow_only));
             break;
         case P_ROW_BPR_MFOC:
             solver = shared_ptr<SolverBase>(new ROW_BPR_MFOC(scheduler,
-                        blocks, PG, QG, model, param, slow_only));
+                        block, PG, QG, model, param, slow_only));
             break;
         case P_COL_BPR_MFOC:
             solver = shared_ptr<SolverBase>(new COL_BPR_MFOC(scheduler,
-                        blocks, PG, QG, model, param, slow_only));
+                        block, PG, QG, model, param, slow_only));
             break;
     }
     return solver;
@@ -2239,9 +2219,7 @@ void fpsg_core(
     mf_problem *va,
     mf_parameter &param,
     mf_float scale,
-    vector<BlockBase*> &block_ptrs,
-    vector<mf_int> &inv_p_map,
-    vector<mf_int> &inv_q_map,
+    vector<BlockBase*> block_ptrs,
     vector<mf_int> &omega_p,
     vector<mf_int> &omega_q,
     shared_ptr<mf_model> &model)
@@ -2290,9 +2268,7 @@ void fpsg_core(
     vector<thread> threads;
     for(mf_int i = 0; i < param.nr_threads; i++)
     {
-        shared_ptr<SolverBase> solver = SolverFactory::get_solver(ref(sched),
-                ref(block_ptrs), PG.data(), QG.data(), ref(*model), param,
-                ref(slow_only));
+        shared_ptr<SolverBase> solver = SolverFactory::get_solver(ref(sched), ref(block_ptrs[i]), PG.data(), QG.data(), ref(*model), param, ref(slow_only)); // is ref necessary?
         threads.emplace_back(&SolverBase::run, solver);
     }
 
@@ -2365,10 +2341,6 @@ void fpsg_core(
 #if defined USESSE || defined USEAVX
     _MM_SET_FLUSH_ZERO_MODE(flush_zero_mode);
 #endif
-
-    util.scale_model(*model, sqrt(scale));
-    Utility::shrink_model(*model, param.k);
-    Utility::shuffle_model(*model, inv_p_map, inv_q_map);
 }
 
 shared_ptr<mf_model> fpsg(
@@ -2385,8 +2357,8 @@ try
     Scheduler sched(param.nr_bins, param.nr_threads, cv_blocks);
     shared_ptr<mf_problem> tr;
     shared_ptr<mf_problem> va;
-    vector<Block> blocks(param.nr_bins*param.nr_bins);
-    vector<BlockBase*> block_ptrs(param.nr_bins*param.nr_bins);
+    vector<Block> blocks(param.nr_threads);
+    vector<BlockBase*> block_ptrs(param.nr_threads);
     vector<mf_node*> ptrs;
     vector<mf_int> p_map;
     vector<mf_int> q_map;
@@ -2434,19 +2406,16 @@ try
     util.shuffle_problem(*va, p_map, q_map);
     util.scale_problem(*tr, (mf_float)1.0/scale);
     util.scale_problem(*va, (mf_float)1.0/scale);
-    ptrs = util.grid_problem(*tr, param.nr_bins, omega_p, omega_q);
-
-    for(mf_int i = 0; i < param.nr_bins*param.nr_bins; i++)
-    {
-        blocks[i] = Block(ptrs[i], ptrs[i+1]);
-        block_ptrs[i] = &blocks[i];
-    }
+    ptrs = util.grid_problem(*tr, param.nr_bins, omega_p, omega_q, blocks);
 
     model = shared_ptr<mf_model>(Utility::init_model(tr->m, tr->n, param.k, omega_p, omega_q),
                                [] (mf_model *ptr) { mf_destroy_model(&ptr); });
 
-    fpsg_core(util, sched, tr.get(), va.get(), param, scale, block_ptrs,
-            inv_p_map, inv_q_map, omega_p, omega_q, model);
+    for(mf_int i = 0; i < param.nr_threads; i++)
+        block_ptrs[i] = &blocks[i];
+
+    fpsg_core(util, sched, tr.get(), va.get(), param, scale,
+              block_ptrs, omega_p, omega_q, model);
 
     if(cv_error != nullptr)
     {
@@ -2477,6 +2446,9 @@ try
         util.shuffle_problem(*tr, inv_p_map, inv_q_map);
         util.shuffle_problem(*va, inv_p_map, inv_q_map);
     }
+    util.scale_model(*model, sqrt(scale));
+    Utility::shrink_model(*model, param.k);
+    Utility::shuffle_model(*model, inv_p_map, inv_q_map);
 }
 catch(exception const &e)
 {
@@ -2498,8 +2470,8 @@ try
     Scheduler sched(param.nr_bins, param.nr_threads, vector<mf_int>());
     mf_problem tr = {};
     mf_problem va = read_problem(va_path.c_str());
-    vector<BlockOnDisk> blocks(param.nr_bins*param.nr_bins);
-    vector<BlockBase*> block_ptrs(param.nr_bins*param.nr_bins);
+    vector<BlockOnDisk> blocks(param.nr_threads);
+    vector<BlockBase*> block_ptrs(param.nr_threads);
     vector<mf_int> p_map;
     vector<mf_int> q_map;
     vector<mf_int> inv_p_map;
@@ -2524,20 +2496,26 @@ try
 
     util.shuffle_problem(va, p_map, q_map);
     util.scale_problem(va, (mf_float)1.0/scale);
+
     util.grid_shuffle_scale_problem_on_disk(
         tr.m, tr.n, param.nr_bins, scale, tr_path,
-        blocks, p_map, q_map, omega_p, omega_q);
+        p_map, q_map, omega_p, omega_q, blocks);
 
-    model = shared_ptr<mf_model>(Utility::init_model(tr.m, tr.n, param.k, omega_p, omega_q),
-                               [] (mf_model *ptr) { mf_destroy_model(&ptr); });
+    model = shared_ptr<mf_model>(
+            Utility::init_model(tr.m, tr.n, param.k, omega_p, omega_q),
+            [] (mf_model *ptr) { mf_destroy_model(&ptr); });
 
-    for(mf_int i = 0; i < param.nr_bins*param.nr_bins; i++)
+    for(mf_int i = 0; i < param.nr_threads; i++)
         block_ptrs[i] = &blocks[i];
 
-    fpsg_core(util, sched, &tr, &va, param, scale, block_ptrs,
-            inv_p_map, inv_q_map, omega_p, omega_q, model);
+    fpsg_core(util, sched, &tr, &va, param, scale,
+              block_ptrs, omega_p, omega_q, model);
 
     delete [] va.R;
+
+    util.scale_model(*model, sqrt(scale));
+    Utility::shrink_model(*model, param.k);
+    Utility::shuffle_model(*model, inv_p_map, inv_q_map);
 }
 catch(exception const &e)
 {
@@ -2594,9 +2572,9 @@ bool check_parameter(mf_parameter param)
         return false;
     }
 
-    if(param.eta < 0)
+    if(param.eta <= 0)
     {
-        cerr << "learning rate should be must than zero" << endl;
+        cerr << "learning rate should be must be greater than zero" << endl;
         return false;
     }
 
