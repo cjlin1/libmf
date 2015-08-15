@@ -38,6 +38,7 @@ string train_help()
 "  for numerical matrix factorization\n"
 "\t 0 -- L2-loss\n"
 "\t 1 -- L1-loss\n"
+"\t 2 -- Generalized KL-divergence\n"
 "  for binary matrix factorization\n"
 "\t 5 -- logistic loss\n"
 "\t 6 -- square hinge loss\n"
@@ -91,14 +92,16 @@ Option parse_option(int argc, char **argv)
 
             char *pch = strtok(argv[i], ",");
             if(!is_numerical(pch))
-                throw invalid_argument("regularization coefficient should be a number");
+                throw invalid_argument("regularization coefficient\
+                                        should be a number");
             option.param.lambda_p1 = (mf_float)strtod(pch, NULL);
             option.param.lambda_q1 = (mf_float)strtod(pch, NULL);
             pch = strtok(NULL, ",");
             if(pch != NULL)
             {
                 if(!is_numerical(pch))
-                    throw invalid_argument("regularization coefficient should be a number");
+                    throw invalid_argument("regularization coefficient\
+                                            should be a number");
                 option.param.lambda_q1 = (mf_float)strtod(pch, NULL);
             }
         }
@@ -110,21 +113,24 @@ Option parse_option(int argc, char **argv)
 
             char *pch = strtok(argv[i], ",");
             if(!is_numerical(pch))
-                throw invalid_argument("regularization coefficient should be a number");
+                throw invalid_argument("regularization coefficient\
+                                        should be a number");
             option.param.lambda_p2 = (mf_float)strtod(pch, NULL);
             option.param.lambda_q2 = (mf_float)strtod(pch, NULL);
             pch = strtok(NULL, ",");
             if(pch != NULL)
             {
                 if(!is_numerical(pch))
-                    throw invalid_argument("regularization coefficient should be a number");
+                    throw invalid_argument("regularization coefficient\
+                                            should be a number");
                 option.param.lambda_q2 = (mf_float)strtod(pch, NULL);
             }
         }
         else if(args[i].compare("-k") == 0)
         {
             if((i+1) >= argc)
-                throw invalid_argument("need to specify number of factors after -k");
+                throw invalid_argument("need to specify number of factors\
+                                        after -k");
             i++;
 
             if(!is_numerical(argv[i]))
@@ -134,7 +140,8 @@ Option parse_option(int argc, char **argv)
         else if(args[i].compare("-t") == 0)
         {
             if((i+1) >= argc)
-                throw invalid_argument("need to specify number of iterations after -t");
+                throw invalid_argument("need to specify number of iterations\
+                                        after -t");
             i++;
 
             if(!is_numerical(argv[i]))
@@ -154,7 +161,8 @@ Option parse_option(int argc, char **argv)
         else if(args[i].compare("-s") == 0)
         {
             if((i+1) >= argc)
-                throw invalid_argument("need to specify number of threads after -s");
+                throw invalid_argument("need to specify number of threads\
+                                        after -s");
             i++;
 
             if(!is_numerical(argv[i]))
@@ -172,7 +180,8 @@ Option parse_option(int argc, char **argv)
         else if(args[i].compare("-v") == 0)
         {
             if(i == argc-1)
-                throw invalid_argument("need to specify number of folds after -v");
+                throw invalid_argument("need to specify number of folds\
+                                        after -v");
             i++;
 
             if(!is_numerical(argv[i]))
@@ -180,13 +189,15 @@ Option parse_option(int argc, char **argv)
             option.nr_folds = atoi(argv[i]);
 
             if(option.nr_folds < 2)
-                throw invalid_argument("number of folds must be greater than one");
+                throw invalid_argument("number of folds\
+                                        must be greater than one");
             option.do_cv = true;
         }
         else if(args[i].compare("-x") == 0)
         {
             if(i == argc-1)
-                throw invalid_argument("need to specify the type of solver after -x");
+                throw invalid_argument("need to specify the type of solver\
+                                        after -x");
             i++;
 
             if(!is_numerical(argv[i]))
@@ -196,7 +207,8 @@ Option parse_option(int argc, char **argv)
         else if(args[i].compare("-n") == 0)
         {
             if(i == argc-1)
-                throw invalid_argument("need to specify the number of blocks after -n");
+                throw invalid_argument("need to specify the number of blocks\
+                                        after -n");
             i++;
 
             if(!is_numerical(argv[i]))
@@ -254,7 +266,8 @@ Option parse_option(int argc, char **argv)
         throw invalid_argument("invalid argument");
     }
 
-    option.param.nr_bins = max(option.param.nr_bins, 2*option.param.nr_threads);
+    option.param.nr_bins = max(option.param.nr_bins,
+                               2*option.param.nr_threads);
     option.param.copy_data = false;
 
     return option;

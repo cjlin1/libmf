@@ -11,7 +11,6 @@
 #include <queue>
 #include <random>
 #include <stdexcept>
-#include <sstream>
 #include <string>
 #include <thread>
 #include <unordered_set>
@@ -601,11 +600,14 @@ mf_double Utility::calc_error(mf_node const *R, mf_long const size,
         mf_float z = mf_predict(&model, N.u, N.v);
         switch(solver)
         {
+            case P_L2_MFR:
+                error += pow(N.r-z, 2);
+                break;
             case P_L1_MFR:
                 error += abs(N.r-z);
                 break;
-            case P_L2_MFR:
-                error += pow(N.r-z, 2);
+            case P_KL_MFR:
+                error += N.r*log(N.r/z)-N.r+z;
                 break;
             case P_LR_MFC:
                 if(N.r > 0)
@@ -637,6 +639,9 @@ string Utility::get_error_legend()
             break;
         case P_L1_MFR:
             return string("mae");
+            break;
+        case P_KL_MFR:
+            return string("kl");
             break;
         case P_LR_MFC:
             return string("logloss");
@@ -1549,6 +1554,55 @@ inline void L1_MFR::prepare()
 }
 #endif
 
+class KL_MFR : public MFSolver
+{
+public:
+    KL_MFR(Scheduler &scheduler, BlockBase* block, mf_float *PG, mf_float *QG,
+           mf_model &model, mf_parameter param, bool &slow_only)
+        : MFSolver(scheduler, block, PG, QG, model, param, slow_only) {}
+
+protected:
+    void prepare();
+};
+
+#if defined USESSE
+inline void KL_MFR::prepare()
+{
+    MFSolver::prepare();
+    *XMMz = _mm_hadd_ps(*XMMz, *XMMz);
+    *XMMz = _mm_hadd_ps(*XMMz, *XMMz);
+    *XMMz = _mm_div_ps(_mm_set1_ps(N->r), *XMMz);
+    _mm_store_ss(&z, *XMMz);
+    *XMMloss = _mm_add_pd(*XMMloss, _mm_cvtps_pd(
+               _mm_set1_ps(N->r*(log(z)-1+1/z))));
+    *XMMerror = *XMMloss;
+    *XMMz = _mm_sub_ps(*XMMz, _mm_set1_ps(1.0f));
+}
+#elif defined USEAVX
+inline void KL_MFR::prepare()
+{
+    MFSolver::prepare();
+    *XMMz = _mm256_add_ps(*XMMz, _mm256_permute2f128_ps(*XMMz, *XMMz, 0x1));
+    *XMMz = _mm256_hadd_ps(*XMMz, *XMMz);
+    *XMMz = _mm256_hadd_ps(*XMMz, *XMMz);
+    *XMMz = _mm256_div_ps(_mm256_set1_ps(N->r), *XMMz);
+    _mm_store_ss(&z, _mm256_castps256_ps128(*XMMz));
+    *XMMloss = _mm_add_pd(*XMMloss, _mm_cvtps_pd(
+               _mm_set1_ps(N->r*(log(z)-1+1/z))));
+    *XMMerror = *XMMloss;
+    *XMMz = _mm256_sub_ps(*XMMz, _mm256_set1_ps(1.0f));
+}
+#else
+inline void KL_MFR::prepare()
+{
+    MFSolver::prepare();
+    z = N->r/z;
+    loss += N->r*(log(z)-1+1/z);
+    error = loss;
+    z -= 1;
+}
+#endif
+
 class LR_MFC : public MFSolver
 {
 public:
@@ -1994,7 +2048,7 @@ inline void BPRSolver::sg_update(mf_int d_begin, mf_int d_end)
                 _mm256_set1_ps(-0.0f));
             XMMp = _mm256_xor_ps(XMMflip,
                    _mm256_max_ps(_mm256_sub_ps(_mm256_xor_ps(XMMp, XMMflip),
-                   _mm256_mul_ps(XMMeta_p, *XMMlambda_p1))
+                   _mm256_mul_ps(XMMeta_p, *XMMlambda_p1)),
                    _mm256_set1_ps(0.0f)));
         }
 
@@ -2245,6 +2299,10 @@ shared_ptr<SolverBase> SolverFactory::get_solver(
             solver = shared_ptr<SolverBase>(new L1_MFR(scheduler, block,
                         PG, QG, model, param, slow_only));
             break;
+        case P_KL_MFR:
+            solver = shared_ptr<SolverBase>(new KL_MFR(scheduler, block,
+                        PG, QG, model, param, slow_only));
+            break;
         case P_LR_MFC:
             solver = shared_ptr<SolverBase>(new LR_MFC(scheduler, block,
                         PG, QG, model, param, slow_only));
@@ -2281,7 +2339,9 @@ void fpsg_core(
     vector<mf_int> &omega_q,
     shared_ptr<mf_model> &model)
 {
-    if(param.solver == P_L2_MFR || param.solver == P_L1_MFR)
+    if(param.solver == P_L2_MFR ||
+       param.solver == P_L1_MFR ||
+       param.solver == P_KL_MFR)
     {
         switch(param.solver)
         {
@@ -2292,6 +2352,7 @@ void fpsg_core(
                 param.lambda_q1 /= (mf_float)pow(scale, 1.5);
                 break;
             case P_L1_MFR:
+            case P_KL_MFR:
                 param.lambda_p1 /= sqrt(scale);
                 param.lambda_q1 /= sqrt(scale);
                 break;
@@ -2353,6 +2414,7 @@ void fpsg_core(
                     tr_error = sqrt(tr_error*scale*scale);
                     break;
                 case P_L1_MFR:
+                case P_KL_MFR:
                     reg = reg1*sqrt(scale)+reg2*scale;
                     tr_loss *= scale;
                     tr_error *= scale;
@@ -2377,6 +2439,7 @@ void fpsg_core(
                         va_error = sqrt(va_error*scale*scale);
                         break;
                     case P_L1_MFR:
+                    case P_KL_MFR:
                         va_error *= scale;
                         break;
                 }
@@ -2455,7 +2518,9 @@ try
 
     util.collect_info(*tr, avg, std_dev);
 
-    if(param.solver == P_L2_MFR || param.solver == P_L1_MFR)
+    if(param.solver == P_L2_MFR ||
+       param.solver == P_L1_MFR ||
+       param.solver == P_KL_MFR)
         scale = max((mf_float)1e-4, std_dev);
 
     p_map = Utility::gen_random_map(tr->m);
@@ -2500,6 +2565,7 @@ try
                 *cv_error = sqrt(*cv_error*scale*scale);
                 break;
             case P_L1_MFR:
+            case P_KL_MFR:
                 *cv_error *= scale;
                 break;
         }
@@ -2551,7 +2617,9 @@ try
 
     util.collect_info_on_disk(tr_path, tr, avg, std_dev);
 
-    if(param.solver == P_L2_MFR || param.solver == P_L1_MFR)
+    if(param.solver == P_L2_MFR ||
+       param.solver == P_L1_MFR ||
+       param.solver == P_KL_MFR)
         scale = max((mf_float)1e-4, std_dev);
 
     p_map = Utility::gen_random_map(tr.m);
@@ -2596,6 +2664,7 @@ bool check_parameter(mf_parameter param)
 {
     if(param.solver != P_L2_MFR &&
        param.solver != P_L1_MFR &&
+       param.solver != P_KL_MFR &&
        param.solver != P_LR_MFC &&
        param.solver != P_L2_MFC &&
        param.solver != P_L1_MFC &&
@@ -2642,6 +2711,13 @@ bool check_parameter(mf_parameter param)
     if(param.eta <= 0)
     {
         cerr << "learning rate should be must be greater than zero" << endl;
+        return false;
+    }
+
+    if(param.solver == P_KL_MFR && !param.do_nmf)
+    {
+        cerr << "--nmf must be set when using generalized KL-divergence"
+             << endl;
         return false;
     }
 
@@ -2954,6 +3030,23 @@ mf_double calc_mae(mf_problem *prob, mf_model *model)
     {
         mf_node &N = prob->R[i];
         loss += abs(N.r - mf_predict(model, N.u, N.v));
+    }
+    return loss/prob->nnz;
+}
+
+mf_double calc_gkl(mf_problem *prob, mf_model *model)
+{
+    if(prob->nnz == 0)
+        return 0;
+    mf_double loss = 0;
+#if defined USEOMP
+#pragma omp parallel for schedule(static) reduction(+:loss)
+#endif
+    for(mf_long i = 0; i < prob->nnz; i++)
+    {
+        mf_node &N = prob->R[i];
+        mf_float z = mf_predict(model, N.u, N.v);
+        loss += N.r*log(N.r/z)-N.r+z;
     }
     return loss/prob->nnz;
 }
