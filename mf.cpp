@@ -2348,7 +2348,7 @@ void fpsg_core(
     Scheduler &sched,
     mf_problem *tr,
     mf_problem *va,
-    mf_parameter &param,
+    mf_parameter param,
     mf_float scale,
     vector<BlockBase*> block_ptrs,
     vector<mf_int> &omega_p,
@@ -2379,7 +2379,6 @@ void fpsg_core(
     auto flush_zero_mode = _MM_GET_FLUSH_ZERO_MODE();
     _MM_SET_FLUSH_ZERO_MODE(_MM_FLUSH_ZERO_ON);
 #endif
-
     if(!param.quiet)
     {
         cout.width(4);
@@ -2425,13 +2424,13 @@ void fpsg_core(
             switch(param.solver)
             {
                 case P_L2_MFR:
-                    reg = reg1*sqrt(scale)+reg2*scale;
+                    reg = (reg1+reg2)*scale*scale;
                     tr_loss *= scale*scale;
                     tr_error = sqrt(tr_error*scale*scale);
                     break;
                 case P_L1_MFR:
                 case P_KL_MFR:
-                    reg = reg1*sqrt(scale)+reg2*scale;
+                    reg = (reg1+reg2)*scale;
                     tr_loss *= scale;
                     tr_error *= scale;
                     break;
@@ -3045,7 +3044,7 @@ mf_float mf_predict(mf_model const *model, mf_int u, mf_int v)
     if(model->solver != P_L2_MFR &&
        model->solver != P_L1_MFR &&
        model->solver != P_KL_MFR)
-        z = z > 0? 1: -1;
+        z = z > 0.0f? 1.0f: -1.0f;
 
     return z;
 }
