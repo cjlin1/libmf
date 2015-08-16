@@ -15,6 +15,7 @@
 #include <thread>
 #include <unordered_set>
 #include <vector>
+#include <limits>
 
 #include "mf.h"
 
@@ -407,7 +408,8 @@ public:
     static mf_problem* copy_problem(mf_problem const *prob, bool copy_data);
     static vector<mf_int> gen_random_map(mf_int size);
     static mf_float* malloc_aligned_float(mf_long size);
-    static mf_model* init_model(mf_int m, mf_int n, mf_int k,
+    static mf_model* init_model(mf_int solver, mf_int m, mf_int n,
+                                mf_int k, mf_float avg,
                                 vector<mf_int> &omega_p,
                                 vector<mf_int> &omega_q);
     static mf_float inner_product(mf_float *p, mf_float *q, mf_int k);
@@ -496,7 +498,9 @@ void Utility::scale_model(mf_model &model, mf_float scale)
 
     mf_int k = model.k;
 
-    auto scale1 = [&] (mf_float *ptr, mf_int size)
+    model.b *= scale;
+
+    auto scale1 = [&] (mf_float *ptr, mf_int size, mf_float factor_scale)
     {
 #if defined USEOMP
 #pragma omp parallel for num_threads(nr_threads) schedule(static)
@@ -505,12 +509,12 @@ void Utility::scale_model(mf_model &model, mf_float scale)
         {
             mf_float *ptr1 = ptr+(mf_long)i*model.k;
             for(mf_int d = 0; d < k; d++)
-                ptr1[d] *= scale;
+                ptr1[d] *= factor_scale;
         }
     };
 
-    scale1(model.P, model.m);
-    scale1(model.Q, model.n);
+    scale1(model.P, model.m, sqrt(scale));
+    scale1(model.Q, model.n, sqrt(scale));
 }
 
 mf_float Utility::inner_product(mf_float *p, mf_float *q, mf_int k)
@@ -551,6 +555,9 @@ mf_double Utility::calc_reg1(mf_model &model,
         mf_double reg = 0;
         for(mf_int i = 0; i < size; i++)
         {
+            if(omega[i] <= 0)
+                continue;
+
             mf_float tmp = 0;
             for(mf_int j = 0; j < model.k; j++)
                 tmp += abs(ptr[i*model.k+j]);
@@ -576,6 +583,9 @@ mf_double Utility::calc_reg2(mf_model &model,
 #endif
         for(mf_int i = 0; i < size; i++)
         {
+            if(omega[i] <= 0)
+                continue;
+
             mf_float *ptr1 = ptr+(mf_long)i*model.k;
             reg += omega[i]*Utility::inner_product(ptr1, ptr1, model.k);
         }
@@ -832,17 +842,22 @@ mf_float* Utility::malloc_aligned_float(mf_long size)
     return (mf_float*)ptr;
 }
 
-mf_model* Utility::init_model(mf_int m, mf_int n, mf_int k,
-                              vector<mf_int> &omega_p, vector<mf_int> &omega_q)
+mf_model* Utility::init_model(mf_int solver,
+                              mf_int m, mf_int n,
+                              mf_int k, mf_float avg,
+                              vector<mf_int> &omega_p,
+                              vector<mf_int> &omega_q)
 {
     mf_int k_real = k;
     mf_int k_aligned = (mf_int)ceil(mf_double(k)/kALIGN)*kALIGN;
 
     mf_model *model = new mf_model;
 
+    model->solver = solver;
     model->m = m;
     model->n = n;
     model->k = k_aligned;
+    model->b = avg;
     model->P = nullptr;
     model->Q = nullptr;
 
@@ -867,12 +882,13 @@ mf_model* Utility::init_model(mf_int m, mf_int n, mf_int k,
         memset(start_ptr, 0, sizeof(mf_float)*size*model->k);
         for(mf_long i = 0; i < size; i++)
         {
-            if(counts[i] <= 0)
-                continue;
             mf_float * ptr = start_ptr + i*model->k;
-            for(mf_long d = 0; d < k_real; d++, ptr++)
-                *ptr = (mf_float)(distribution(generator)*scale);
-
+            if(counts[i] > 0)
+                for(mf_long d = 0; d < k_real; d++, ptr++)
+                    *ptr = (mf_float)(distribution(generator)*scale);
+            else
+                for(mf_long d = 0; d < k_real; d++, ptr++)
+                    *ptr = numeric_limits<mf_float>::quiet_NaN();
         }
     };
 
@@ -2536,8 +2552,8 @@ try
     util.scale_problem(*va, (mf_float)1.0/scale);
     ptrs = util.grid_problem(*tr, param.nr_bins, omega_p, omega_q, blocks);
 
-    model = shared_ptr<mf_model>(
-                Utility::init_model(tr->m, tr->n, param.k, omega_p, omega_q),
+    model = shared_ptr<mf_model>(Utility::init_model(param.solver,
+                tr->m, tr->n, param.k, avg/scale, omega_p, omega_q),
                 [] (mf_model *ptr) { mf_destroy_model(&ptr); });
 
     for(mf_int i = 0; i < param.nr_threads; i++)
@@ -2579,7 +2595,7 @@ try
         util.shuffle_problem(*va, inv_p_map, inv_q_map);
     }
 
-    util.scale_model(*model, sqrt(scale));
+    util.scale_model(*model, scale);
     Utility::shrink_model(*model, param.k);
     Utility::shuffle_model(*model, inv_p_map, inv_q_map);
 }
@@ -2636,9 +2652,9 @@ try
         tr.m, tr.n, param.nr_bins, scale, tr_path,
         p_map, q_map, omega_p, omega_q, blocks);
 
-    model = shared_ptr<mf_model>(
-            Utility::init_model(tr.m, tr.n, param.k, omega_p, omega_q),
-            [] (mf_model *ptr) { mf_destroy_model(&ptr); });
+    model = shared_ptr<mf_model>(Utility::init_model(param.solver,
+                tr.m, tr.n, param.k, avg/scale, omega_p, omega_q),
+                [] (mf_model *ptr) { mf_destroy_model(&ptr); });
 
     for(mf_int i = 0; i < param.nr_threads; i++)
         block_ptrs[i] = &blocks[i];
@@ -2648,7 +2664,7 @@ try
 
     delete [] va.R;
 
-    util.scale_model(*model, sqrt(scale));
+    util.scale_model(*model, scale);
     Utility::shrink_model(*model, param.k);
     Utility::shuffle_model(*model, inv_p_map, inv_q_map);
 }
@@ -2741,6 +2757,7 @@ mf_model* mf_train_with_validation(
     model_ret->m = model->m;
     model_ret->n = model->n;
     model_ret->k = model->k;
+    model_ret->b = model->b;
 
     model_ret->P = model->P;
     model->P = nullptr;
@@ -2767,6 +2784,7 @@ mf_model* mf_train_with_validation_on_disk(
     model_ret->m = model->m;
     model_ret->n = model->n;
     model_ret->k = model->k;
+    model_ret->b = model->b;
 
     model_ret->P = model->P;
     model->P = nullptr;
@@ -2906,9 +2924,11 @@ mf_int mf_save_model(mf_model const *model, char const *path)
     if(!f.is_open())
         return 1;
 
+    f << "solver " << model->solver << endl;
     f << "m " << model->m << endl;
     f << "n " << model->n << endl;
     f << "k " << model->k << endl;
+    f << "b " << model->b << endl;
 
     auto write = [&] (mf_float *ptr, mf_int size, char prefix)
     {
@@ -2916,10 +2936,21 @@ mf_int mf_save_model(mf_model const *model, char const *path)
         {
             mf_float *ptr1 = ptr + (mf_long)i*model->k;
             f << prefix << i << " ";
-            for(mf_int d = 0; d < model->k; d++)
-                f << ptr1[d] << " ";
+            if(isnan(ptr1[0]))
+            {
+                f << "F ";
+                for(mf_int d = 0; d < model->k; d++)
+                    f << 0 << " ";
+            }
+            else
+            {
+                f << "T ";
+                for(mf_int d = 0; d < model->k; d++)
+                    f << ptr1[d] << " ";
+            }
             f << endl;
         }
+
     };
 
     write(model->P, model->m, 'p');
@@ -2942,7 +2973,8 @@ mf_model* mf_load_model(char const *path)
     model->P = nullptr;
     model->Q = nullptr;
 
-    f >> dummy >> model->m >> dummy >> model->n >> dummy >> model->k;
+    f >> dummy >> model->solver >> dummy >> model->m >> dummy >> model->n >>
+         dummy >> model->k >> dummy >> model->b;
 
     try
     {
@@ -2961,9 +2993,16 @@ mf_model* mf_load_model(char const *path)
         for(mf_int i = 0; i < size; i++)
         {
             mf_float *ptr1 = ptr + (mf_long)i*model->k;
-            f >> dummy;
-            for(mf_int d = 0; d < model->k; d++)
-                f >> ptr1[d];
+            f >> dummy >> dummy;
+            if(dummy.compare("F") == 0) // nan vector starts with "F"
+                for(mf_int d = 0; d < model->k; d++)
+                {
+                    f >> dummy;
+                    ptr1[d] = numeric_limits<mf_float>::quiet_NaN();
+                }
+            else
+                for(mf_int d = 0; d < model->k; d++)
+                    f >> ptr1[d];
         }
     };
 
@@ -2993,12 +3032,22 @@ void mf_destroy_model(mf_model **model)
 mf_float mf_predict(mf_model const *model, mf_int u, mf_int v)
 {
     if(u < 0 || u >= model->m || v < 0 || v >= model->n)
-        return 0.0f;
+        return model->b;
 
     mf_float *p = model->P+(mf_long)u*model->k;
     mf_float *q = model->Q+(mf_long)v*model->k;
 
-    return inner_product(p, p+model->k, q, (mf_float)0.0f);
+    mf_float z = std::inner_product(p, p+model->k, q, (mf_float)0.0f);
+
+    if(isnan(z))
+        z = model->b;
+
+    if(model->solver != P_L2_MFR &&
+       model->solver != P_L1_MFR &&
+       model->solver != P_KL_MFR)
+        z = z > 0? 1: -1;
+
+    return z;
 }
 
 mf_double calc_rmse(mf_problem *prob, mf_model *model)

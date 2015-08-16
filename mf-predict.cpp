@@ -105,7 +105,7 @@ void predict(string test_path, string model_path, string output_path, mf_int eva
     if(!f_out.is_open())
         throw runtime_error("cannot open " + output_path);
 
-    mf_model *model = mf_load_model(model_path.c_str()); // use shared_ptr?
+    mf_model *model = mf_load_model(model_path.c_str());
     if(model == nullptr)
         throw runtime_error("cannot load model from " + model_path);
 
