@@ -223,25 +223,28 @@ mf_double Scheduler::get_error()
 mf_int Scheduler::get_negative(mf_int first_block, mf_int second_block,
         mf_int m, mf_int n, bool is_column_oriented)
 {
-    mf_long rand_val = block_generators[first_block]();
+    mf_int rand_val = (mf_int)block_generators[first_block]();
 
     auto gen_random = [&] (mf_int block_id)
     {
         mf_int v_min, v_max;
 
-        if (is_column_oriented)
+        if(is_column_oriented)
         {
             mf_int seg_size = (mf_int)ceil((double)m/nr_bins);
-            v_min = (block_id / nr_bins) * seg_size;
+            v_min = min((block_id/nr_bins)*seg_size, m-1);
             v_max = min(v_min+seg_size, m-1);
         }
         else
         {
             mf_int seg_size = (mf_int)ceil((double)n/nr_bins);
-            v_min = (block_id % nr_bins) * seg_size;
+            v_min = min((block_id%nr_bins)*seg_size, n-1);
             v_max = min(v_min+seg_size, n-1);
         }
-        return rand_val % (v_max - v_min) + v_min;
+        if(v_max == v_min)
+            return v_min;
+        else
+            return rand_val%(v_max-v_min)+v_min;
     };
 
     if (rand_val % 2)
@@ -601,42 +604,83 @@ mf_double Utility::calc_error(mf_node const *R, mf_long const size,
                               mf_model const &model)
 {
     mf_double error = 0;
+    if(solver == P_L2_MFR || solver == P_L1_MFR || solver == P_L1_MFR ||
+       solver == P_LR_MFC || solver == P_L2_MFC || solver == P_L1_MFC)
+    {
 #if defined USEOMP
 #pragma omp parallel for num_threads(nr_threads) schedule(static) reduction(+:error)
 #endif
-    for(mf_long i = 0; i < size; i++)
-    {
-        mf_node const &N = R[i];
-        mf_float z = mf_predict(&model, N.u, N.v);
-        switch(solver)
+        for(mf_long i = 0; i < size; i++)
         {
-            case P_L2_MFR:
-                error += pow(N.r-z, 2);
-                break;
-            case P_L1_MFR:
-                error += abs(N.r-z);
-                break;
-            case P_KL_MFR:
-                error += N.r*log(N.r/z)-N.r+z;
-                break;
-            case P_LR_MFC:
-                if(N.r > 0)
-                    error += log(1.0+exp(-z));
-                else
-                    error += log(1.0+exp(z));
-                break;
-            case P_L2_MFC:
-            case P_L1_MFC:
-                if(N.r > 0)
-                    error += z > 0? 1: 0;
-                else
-                    error += z < 0? 1: 0;
-                break;
-            default:
-                throw invalid_argument("unknown error function");
-                break;
+            mf_node const &N = R[i];
+            mf_float z = mf_predict(&model, N.u, N.v);
+            switch(solver)
+            {
+                case P_L2_MFR:
+                    error += pow(N.r-z, 2);
+                    break;
+                case P_L1_MFR:
+                    error += abs(N.r-z);
+                    break;
+                case P_KL_MFR:
+                    error += N.r*log(N.r/z)-N.r+z;
+                    break;
+                case P_LR_MFC:
+                    if(N.r > 0)
+                        error += log(1.0+exp(-z));
+                    else
+                        error += log(1.0+exp(z));
+                    break;
+                case P_L2_MFC:
+                case P_L1_MFC:
+                    if(N.r > 0)
+                        error += z > 0? 1: 0;
+                    else
+                        error += z < 0? 1: 0;
+                    break;
+                default:
+                    throw invalid_argument("unknown error function");
+                    break;
+            }
         }
     }
+    else
+    {
+        minstd_rand0 generator(rand());
+        switch(solver)
+        {
+            case P_ROW_BPR_MFOC:
+            {
+                uniform_int_distribution<mf_int> distribution;(0, model.n-1);
+                for(mf_long i = 0; i < size; i++)
+                {
+                    mf_node const &N = R[i];
+                    mf_int w = distribution(generator);
+                    error += log(1+exp(mf_predict(&model, N.u, w)-
+                                       mf_predict(&model, N.u, N.v)));
+                }
+                break;
+            }
+            case P_COL_BPR_MFOC:
+            {
+                uniform_int_distribution<mf_int> distribution;(0, model.m-1);
+                for(mf_long i = 0; i < size; i++)
+                {
+                    mf_node const &N = R[i];
+                    mf_int w = distribution(generator);
+                    error += log(1+exp(mf_predict(&model, w, N.v)-
+                                       mf_predict(&model, N.u, N.v)));
+                }
+                break;
+            }
+            default:
+            {
+                throw invalid_argument("unknown error function");
+                break;
+            }
+        }
+    }
+
     return error;
 }
 
@@ -659,6 +703,10 @@ string Utility::get_error_legend()
         case P_L2_MFC:
         case P_L1_MFC:
             return string("accuracy");
+            break;
+        case P_ROW_BPR_MFOC:
+        case P_COL_BPR_MFOC:
+            return string("bprloss");
             break;
         default:
             return string();
@@ -883,12 +931,16 @@ mf_model* Utility::init_model(mf_int solver,
         for(mf_long i = 0; i < size; i++)
         {
             mf_float * ptr = start_ptr + i*model->k;
-            if(counts[i] > 0)
-                for(mf_long d = 0; d < k_real; d++, ptr++)
-                    *ptr = (mf_float)(distribution(generator)*scale);
+            if(solver != P_ROW_BPR_MFOC && solver != P_COL_BPR_MFOC)
+                if(counts[i] > 0)
+                    for(mf_long d = 0; d < k_real; d++, ptr++)
+                        *ptr = (mf_float)(distribution(generator)*scale);
+                else
+                    for(mf_long d = 0; d < k_real; d++, ptr++)
+                        *ptr = numeric_limits<mf_float>::quiet_NaN();
             else
                 for(mf_long d = 0; d < k_real; d++, ptr++)
-                    *ptr = numeric_limits<mf_float>::quiet_NaN();
+                    *ptr = (mf_float)(distribution(generator)*scale);
         }
     };
 
@@ -2734,6 +2786,27 @@ bool check_parameter(mf_parameter param)
         cerr << "--nmf must be set when using generalized KL-divergence"
              << endl;
         return false;
+    }
+
+    if(param.solver == P_ROW_BPR_MFOC || param.solver == P_COL_BPR_MFOC)
+    {
+        if(param.nr_bins < 4*param.nr_threads)
+        {
+            cerr << "Increase the number of blocks (at least greater "
+                 << "than the square of four times of the number "
+                 << "of threads)" << endl;
+            return false;
+        }
+    }
+    else
+    {
+        if(param.nr_bins < 2*param.nr_threads)
+        {
+            cerr << "Increase the number of blocks (at least greater "
+                 << "than the square of two times of the number "
+                 << "of threads)" << endl;
+            return false;
+        }
     }
 
     return true;

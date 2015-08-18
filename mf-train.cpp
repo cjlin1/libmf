@@ -50,9 +50,9 @@ string train_help()
 "-t <iter>: set number of iterations (default 20)\n"
 "-r <eta>: set learning rate (default 0.1)\n"
 "-s <threads>: set number of threads (default 12)\n"
+"-n <blocks>: set number of blocks (default 4*(# of threads)^2)\n"
 "-p <path>: set path to the validation set\n"
 "-v <fold>: set number of folds for cross validation\n"
-"-n <blocks>: set number of blocks\n"
 "--quiet: quiet mode (no outputs)\n"
 "--nmf: perform non-negative matrix factorization\n"
 "--disk: use disk to store blocks for training\n");
