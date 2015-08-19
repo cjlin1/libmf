@@ -931,16 +931,13 @@ mf_model* Utility::init_model(mf_int solver,
         for(mf_long i = 0; i < size; i++)
         {
             mf_float * ptr = start_ptr + i*model->k;
-            if(solver != P_ROW_BPR_MFOC && solver != P_COL_BPR_MFOC)
-                if(counts[i] > 0)
-                    for(mf_long d = 0; d < k_real; d++, ptr++)
-                        *ptr = (mf_float)(distribution(generator)*scale);
-                else
-                    for(mf_long d = 0; d < k_real; d++, ptr++)
-                        *ptr = numeric_limits<mf_float>::quiet_NaN();
-            else
+            if(counts[i] > 0)
                 for(mf_long d = 0; d < k_real; d++, ptr++)
                     *ptr = (mf_float)(distribution(generator)*scale);
+            else
+                if(solver != P_ROW_BPR_MFOC && solver != P_COL_BPR_MFOC) // unseen for bpr should be 0
+                    for(mf_long d = 0; d < k_real; d++, ptr++)
+                        *ptr = numeric_limits<mf_float>::quiet_NaN();
         }
     };
 
@@ -2826,6 +2823,7 @@ mf_model* mf_train_with_validation(
 
     mf_model *model_ret = new mf_model;
 
+    model_ret->solver = model->solver;
     model_ret->m = model->m;
     model_ret->n = model->n;
     model_ret->k = model->k;
@@ -2853,6 +2851,7 @@ mf_model* mf_train_with_validation_on_disk(
 
     mf_model *model_ret = new mf_model;
 
+    model_ret->solver = model->solver;
     model_ret->m = model->m;
     model_ret->n = model->n;
     model_ret->k = model->k;
@@ -3114,9 +3113,9 @@ mf_float mf_predict(mf_model const *model, mf_int u, mf_int v)
     if(isnan(z))
         z = model->b;
 
-    if(model->solver != P_L2_MFR &&
-       model->solver != P_L1_MFR &&
-       model->solver != P_KL_MFR)
+    if(model->solver == P_L2_MFC &&
+       model->solver == P_L1_MFC &&
+       model->solver == P_LR_MFC)
         z = z > 0.0f? 1.0f: -1.0f;
 
     return z;
@@ -3222,15 +3221,15 @@ pair<mf_double, mf_double> calc_mpr_auc(mf_problem *prob,
     {
         row_ptr = &mf_node::u;
         col_ptr = &mf_node::v;
-        m = prob->m;
-        n = prob->n;
+        m = max(prob->m, model->m);
+        n = max(prob->n, model->n);
     }
     else
     {
         row_ptr = &mf_node::v;
         col_ptr = &mf_node::u;
-        m = prob->n;
-        n = prob->m;
+        m = max(prob->n, model->n);
+        n = max(prob->m, model->m);
     }
 
     auto sort_by_id = [&] (mf_node const &lhs, mf_node const &rhs)
