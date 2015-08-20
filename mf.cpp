@@ -935,7 +935,7 @@ mf_model* Utility::init_model(mf_int solver,
                 for(mf_long d = 0; d < k_real; d++, ptr++)
                     *ptr = (mf_float)(distribution(generator)*scale);
             else
-                if(solver != P_ROW_BPR_MFOC && solver != P_COL_BPR_MFOC) // unseen for bpr should be 0
+                if(solver != P_ROW_BPR_MFOC && solver != P_COL_BPR_MFOC) // unseen for bpr is 0
                     for(mf_long d = 0; d < k_real; d++, ptr++)
                         *ptr = numeric_limits<mf_float>::quiet_NaN();
         }
@@ -3297,26 +3297,33 @@ pair<mf_double, mf_double> calc_mpr_auc(mf_problem *prob,
 
         for(auto neg_it = row.begin()+pos; neg_it != row.end(); neg_it++)
         {
-            mf_int left = 0;
-            mf_int right = pos - 1;
-            while(left <= right)
+            if(row[pos-1].second <= neg_it->second)
             {
-                mf_int mid = (left + right)/2;
-                if(row[mid].second >= neg_it->second)
-                    right = mid - 1;
+                u_mpr += pos;
+                u_auc += pos;
+                continue;
+            }
+
+            mf_int left = 0;
+            mf_int right = pos-1;
+            while(left < right)
+            {
+                mf_int mid = (left+right)/2;
+                if(row[mid].second > neg_it->second)
+                    right = mid;
                 else
-                    left = mid + 1;
+                    left = mid+1;
             }
             u_mpr += left;
-            u_auc += pos - left;
+            u_auc += pos-left;
+        }
 
-            if(neg > 0 && pos > 0)
-            {
-                u_mpr /= neg;
-                u_auc /= neg*pos;
-                all_u_mpr += u_mpr;
-                all_u_auc += u_auc;
-            }
+        if(neg > 0 && pos > 0)
+        {
+            u_mpr /= neg;
+            u_auc /= neg*pos;
+            all_u_mpr += u_mpr;
+            all_u_auc += u_auc;
         }
     }
     all_u_mpr /= prob->nnz;
