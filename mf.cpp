@@ -3249,6 +3249,8 @@ pair<mf_double, mf_double> calc_mpr_auc(mf_problem *prob,
     for(mf_int i = 1; i < m+1; i++)
         pos_cnts[i] += pos_cnts[i-1];
 
+    mf_int total_m = 0;
+    mf_long total_pos = 0;
     mf_double all_u_mpr = 0;
     mf_double all_u_auc = 0;
 #if defined USEOMP
@@ -3270,11 +3272,7 @@ pair<mf_double, mf_double> calc_mpr_auc(mf_problem *prob,
             row[j] = make_pair(N, mf_predict(model, N.u, N.v));
         }
 
-        mf_int neg = 0;
         mf_int pos = 0;
-        mf_double u_mpr = 0;
-        mf_double u_auc = 0;
-
         vector<mf_int> index(pos_cnts[i+1]-pos_cnts[i], 0);
         for(mf_int j = pos_cnts[i]; j < pos_cnts[i+1]; j++)
         {
@@ -3286,7 +3284,13 @@ pair<mf_double, mf_double> calc_mpr_auc(mf_problem *prob,
                 pos++;
             }
         }
-        neg = n - pos;
+
+        if(n-pos < 1 || pos < 1)
+            continue;
+
+        total_m++;
+        total_pos += pos;
+
         mf_int count = 0;
         for(mf_int k = 0; k < pos; k++)
         {
@@ -3295,12 +3299,13 @@ pair<mf_double, mf_double> calc_mpr_auc(mf_problem *prob,
         }
         sort(row.begin(), row.begin()+pos, sort_by_pred);
 
+        mf_double u_mpr = 0;
+        mf_double u_auc = 0;
         for(auto neg_it = row.begin()+pos; neg_it != row.end(); neg_it++)
         {
             if(row[pos-1].second <= neg_it->second)
             {
                 u_mpr += pos;
-                u_auc += pos;
                 continue;
             }
 
@@ -3318,16 +3323,13 @@ pair<mf_double, mf_double> calc_mpr_auc(mf_problem *prob,
             u_auc += pos-left;
         }
 
-        if(neg > 0 && pos > 0)
-        {
-            u_mpr /= neg;
-            u_auc /= neg*pos;
-            all_u_mpr += u_mpr;
-            all_u_auc += u_auc;
-        }
+        all_u_mpr += u_mpr/(n-pos);
+        all_u_auc += u_auc/(n-pos)/pos;
     }
-    all_u_mpr /= prob->nnz;
-    all_u_auc /= m;
+
+    all_u_mpr /= total_pos;
+    all_u_auc /= total_m;
+
     return make_pair(all_u_mpr, all_u_auc);
 }
 
