@@ -50,7 +50,7 @@ string train_help()
 "-t <iter>: set number of iterations (default 20)\n"
 "-r <eta>: set learning rate (default 0.1)\n"
 "-s <threads>: set number of threads (default 12)\n"
-"-n <blocks>: set number of blocks (default 4*(# of threads)^2)\n"
+"-n <blocks>: set number of blocks (may be adjusted by LIBMF)\n"
 "-p <path>: set path to the validation set\n"
 "-v <fold>: set number of folds for cross validation\n"
 "--quiet: quiet mode (no outputs)\n"
@@ -267,7 +267,7 @@ Option parse_option(int argc, char **argv)
     }
 
     option.param.nr_bins = max(option.param.nr_bins,
-                               2*option.param.nr_threads);
+                               2*option.param.nr_threads+1);
     option.param.copy_data = false;
 
     return option;

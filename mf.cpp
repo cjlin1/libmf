@@ -2785,25 +2785,10 @@ bool check_parameter(mf_parameter param)
         return false;
     }
 
-    if(param.solver == P_ROW_BPR_MFOC || param.solver == P_COL_BPR_MFOC)
+    if(param.nr_bins <= 2*param.nr_threads)
     {
-        if(param.nr_bins < 4*param.nr_threads)
-        {
-            cerr << "Increase the number of blocks (at least greater "
-                 << "than the square of four times of the number "
-                 << "of threads)" << endl;
-            return false;
-        }
-    }
-    else
-    {
-        if(param.nr_bins < 2*param.nr_threads)
-        {
-            cerr << "Increase the number of blocks (at least greater "
-                 << "than the square of two times of the number "
-                 << "of threads)" << endl;
-            return false;
-        }
+        cerr << "Warning: insufficient blocks can slow down the training"
+             << "process (4*nr_threads^2+1 blocks is suggested)" << endl;
     }
 
     return true;
@@ -3276,13 +3261,13 @@ pair<mf_double, mf_double> calc_mpr_auc(mf_problem *prob,
         vector<mf_int> index(pos_cnts[i+1]-pos_cnts[i], 0);
         for(mf_int j = pos_cnts[i]; j < pos_cnts[i+1]; j++)
         {
-            if(prob->R[j].r > 0)
-            {
-                mf_int col = prob->R[j].*col_ptr;
-                row[col].first.r = prob->R[j].r;
-                index[pos] = col;
-                pos++;
-            }
+            if(prob->R[j].r <= 0)
+                continue;
+
+            mf_int col = prob->R[j].*col_ptr;
+            row[col].first.r = prob->R[j].r;
+            index[pos] = col;
+            pos++;
         }
 
         if(n-pos < 1 || pos < 1)
