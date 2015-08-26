@@ -1986,6 +1986,7 @@ inline void BPRSolver::sg_update(mf_int d_begin, mf_int d_end)
     __m128 XMMpG = _mm_load1_ps(pG);
     __m128 XMMqG = _mm_load1_ps(qG);
     __m128 XMMwG = _mm_load1_ps(wG);
+
     __m128 XMMeta_p = _mm_mul_ps(*XMMeta, _mm_rsqrt_ps(XMMpG));
     __m128 XMMeta_q = _mm_mul_ps(*XMMeta, _mm_rsqrt_ps(XMMqG));
     __m128 XMMeta_w = _mm_mul_ps(*XMMeta, _mm_rsqrt_ps(XMMwG));
@@ -2000,7 +2001,7 @@ inline void BPRSolver::sg_update(mf_int d_begin, mf_int d_end)
         __m128 XMMq = _mm_load_ps(q+d);
         __m128 XMMw = _mm_load_ps(w+d);
         __m128 XMMpg = _mm_add_ps(_mm_mul_ps(*XMMlambda_p2, XMMp),
-                       _mm_mul_ps(*XMMz, _mm_sub_ps(XMMw, XMMp)));
+                       _mm_mul_ps(*XMMz, _mm_sub_ps(XMMw, XMMq)));
         __m128 XMMqg = _mm_sub_ps(_mm_mul_ps(*XMMlambda_q2, XMMq),
                        _mm_mul_ps(*XMMz, XMMp));
         __m128 XMMwg = _mm_add_ps(_mm_mul_ps(*XMMlambda_q2, XMMw),
@@ -2075,7 +2076,7 @@ inline void BPRSolver::prepare()
     SolverBase::prepare();
     for (mf_int d = 0; d < model.k; d+= 4)
         *XMMz = _mm_sub_ps(*XMMz, _mm_mul_ps(
-               _mm_load_ps(w+d), _mm_load_ps(q+d)));
+               _mm_load_ps(p+d), _mm_load_ps(w+d)));
 
     *XMMz = _mm_hadd_ps(*XMMz, *XMMz);
     *XMMz = _mm_hadd_ps(*XMMz, *XMMz);
@@ -2199,7 +2200,7 @@ inline void BPRSolver::prepare()
     SolverBase::prepare();
     for (mf_int d = 0; d < model.k; d+= 8)
         *XMMz = _mm256_sub_ps(*XMMz, _mm256_mul_ps(
-                _mm256_load_ps(w+d), _mm256_load_ps(q+d)));
+                _mm256_load_ps(p+d), _mm256_load_ps(w+d)));
 
     *XMMz = _mm256_add_ps(*XMMz, _mm256_permute2f128_ps(*XMMz, *XMMz, 0x1));
     *XMMz = _mm256_hadd_ps(*XMMz, *XMMz);
@@ -2327,7 +2328,6 @@ inline void COL_BPR_MFOC::prepare()
     wG = PG + negative*2;
     BPRSolver::prepare();
 }
-
 
 class ROW_BPR_MFOC : public BPRSolver
 {
