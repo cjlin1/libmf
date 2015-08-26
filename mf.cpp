@@ -49,7 +49,7 @@ public:
     mf_int get_job();
     mf_int get_bpr_job(mf_int first_block, bool is_column_oriented);
     void put_job(mf_int block, mf_double loss, mf_double error);
-    void put_bpr_job(mf_int second_block);
+    void put_bpr_job(mf_int first_block, mf_int second_block);
     mf_double get_loss();
     mf_double get_error();
     mf_int get_negative(mf_int first_block, mf_int second_block,
@@ -108,65 +108,82 @@ Scheduler::Scheduler(mf_int nr_bins, mf_int nr_threads,
 
 mf_int Scheduler::get_job()
 {
-    lock_guard<mutex> lock(mtx);
-    vector<pair<mf_float, mf_int>> locked_blocks;
+    bool is_found = false;
+    pair<mf_float, mf_int> block;
 
-    while(true)
+    while(!is_found)
     {
-        pair<mf_float, mf_int> block = pq.top();
-        pq.pop();
-        mf_int p_block = block.second/nr_bins;
-        mf_int q_block = block.second%nr_bins;
-        if(busy_p_blocks[p_block] || busy_q_blocks[q_block])
+        lock_guard<mutex> lock(mtx);
+        vector<pair<mf_float, mf_int>> locked_blocks;
+        mf_int p_block = 0;
+        mf_int q_block = 0;
+
+        while(!pq.empty())
         {
-            locked_blocks.push_back(block);
-            continue;
+            block = pq.top();
+            pq.pop();
+
+            p_block = block.second/nr_bins;
+            q_block = block.second%nr_bins;
+
+            if(busy_p_blocks[p_block] || busy_q_blocks[q_block])
+                locked_blocks.push_back(block);
+            else
+            {
+                busy_p_blocks[p_block] = 1;
+                busy_q_blocks[q_block] = 1;
+                counts[block.second]++;
+                is_found = true;
+                break;
+            }
         }
+
         for(auto &block : locked_blocks)
             pq.push(block);
-        busy_p_blocks[p_block] = 1;
-        busy_q_blocks[q_block] = 1;
-        counts[block.second]++;
-        return block.second;
     }
+
+    return block.second;
 }
 
 mf_int Scheduler::get_bpr_job(mf_int first_block, bool is_column_oriented)
 {
     lock_guard<mutex> lock(mtx);
+    mf_int another = first_block;
     vector<pair<mf_float, mf_int>> locked_blocks;
 
-    while(true)
+    while(!pq.empty())
     {
         pair<mf_float, mf_int> block = pq.top();
         pq.pop();
+
         mf_int p_block = block.second/nr_bins;
         mf_int q_block = block.second%nr_bins;
 
-        bool is_illegal;
-        if(is_column_oriented)
-            is_illegal = first_block%nr_bins != q_block ||
-                         busy_p_blocks[p_block];
-        else
-            is_illegal = first_block/nr_bins != p_block ||
-                         busy_q_blocks[q_block];
-
-        if (is_illegal)
+        auto is_rejected = [&] ()
         {
+            if(is_column_oriented)
+                return first_block%nr_bins != q_block ||
+                       busy_p_blocks[p_block];
+            else
+                return first_block/nr_bins != p_block ||
+                         busy_q_blocks[q_block];
+        };
+
+        if(is_rejected())
             locked_blocks.push_back(block);
-            continue;
-        }
-
-        for(auto &block : locked_blocks)
-            pq.push(block);
-
-        if(is_column_oriented)
-            busy_p_blocks[p_block] = 1;
         else
+        {
+            busy_p_blocks[p_block] = 1;
             busy_q_blocks[q_block] = 1;
-
-        return block.second;
+            another = block.second;
+            break;
+        }
     }
+
+    for(auto &block : locked_blocks)
+        pq.push(block);
+
+    return another;
 }
 
 void Scheduler::put_job(mf_int block_idx, mf_double loss, mf_double error)
@@ -197,14 +214,17 @@ void Scheduler::put_job(mf_int block_idx, mf_double loss, mf_double error)
     }
 }
 
-void Scheduler::put_bpr_job(mf_int second_block)
+void Scheduler::put_bpr_job(mf_int first_block, mf_int second_block)
 {
+    if(first_block == second_block)
+        return;
+
     lock_guard<mutex> lock(mtx);
     {
-    busy_p_blocks[second_block/nr_bins] = 0;
-    busy_q_blocks[second_block%nr_bins] = 0;
-    mf_float priority = (mf_float)counts[second_block];
-    pq.emplace(priority, second_block);
+        busy_p_blocks[second_block/nr_bins] = 0;
+        busy_q_blocks[second_block%nr_bins] = 0;
+        mf_float priority = (mf_float)counts[second_block]+distribution(generator);
+        pq.emplace(priority, second_block);
     }
 }
 
@@ -1951,7 +1971,7 @@ inline void BPRSolver::initialize()
 inline void BPRSolver::finalize()
 {
     SolverBase::finalize();
-    scheduler.put_bpr_job(bpr_bid);
+    scheduler.put_bpr_job(bid, bpr_bid);
 }
 
 inline void BPRSolver::update()
