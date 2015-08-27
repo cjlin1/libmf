@@ -8,6 +8,7 @@ Table of Contents
 
 - Installation
 - Data Format
+- Model Format
 - Command Line Usage
 - Examples
 - Library Usage
@@ -20,26 +21,80 @@ Table of Contents
 Installation
 ============
 
+- Requirements
+  To compile LIBMF, a compiler which supports C++11 is required. LIBMF can
+  use SSE, AVX, and OpenMP for acceleration. See Section SSE, AVX, and OpenMP
+  if you want to disable or enable these features.
+
 - Unix & Cygwin
 
   Type `make' to build `mf-train' and `mf-precict.'
 
 - Windows & Mac
-    
+
   See `Building Windows and Mac Binaries' to compile. For Windows, pre-built
   binaries are available in the directory `windows.'
+
 
 
 Data Format
 ===========
 
-The data format is:
+LIBMF's command-line tool can be used to factorize real-valued and binary
+matrices. Each line in the training file stores a tuple:
 
     <row_idx> <col_idx> <value>
 
-See an example `bigdata.tr.txt.'
+Each tuple records an entry of the training matrix. In the `demo' directory,
+The files `rvmf.tr.txt' and `rvmf.va.txt' are the training and test sets for
+a real-valued matrix factorization whose entries are all real values.
 
-Note: If the values in the test set are unknown, please write dummy zeros.
+we provide training and test sets for real-valued matrix factorization. For
+real-valued MF, a <value> is a real number as shown in `bigdata.tr.txt.' For
+binary MF, the set of <value> is {-1, 1}, for example, `bigdata_bin.tr.txt.'
+For one-class MF, all <value>'s are ones, See an example `bigdata_one.tr.txt.'
+
+Note: If the values in the test set are unknown, please put dummy zeros.
+
+
+
+Model Format
+============
+
+    LIBMF factorizes a training matrix `R' into a k-by-m matrix `P' and a
+    k-by-n matrix `Q' such that `R' is approximated by P'Q. After the training
+    process, the two factor matrices `P' and `Q' are stored into a model file.
+    The file starts with a header including the following parameters:
+
+        `m': the number of rows in the training matrix,
+        `n': the number of columns in the training matrix,
+        `k': the number of latent factors,
+        `b': the average of all elements in the training matrix.
+
+    From the 5th line, the columns of `P' and `Q' are stored line by line.
+    For each line, there are two leading tokens followed by the values of a
+    column. The first token is the name of the stored column, and the second
+    word indicates the type of values. If the second word is `T', the column is
+    a real-valued vector. Otherwise, all values in the column are NaN. For
+    example, if
+
+                            [1 NaN 2]      [-1 -2]
+                        P = |3 NaN 4|, Q = |-3 -4|,
+                            [5 NaN 6]      [-5 -6]
+
+    and the value `b' is 0.5, the content of the model file is:
+
+                        --------model file--------
+                        m 3
+                        n 2
+                        k 3
+                        b 0.5
+                        p1 T 1 3 5
+                        p2 F 0 0 0
+                        p3 T 2 4 6
+                        q1 T -1 -3 -5
+                        q2 T -2 -4 -6
+                        --------------------------
 
 
 
@@ -51,70 +106,142 @@ Command Line Usage
     usage: mf-train [options] training_set_file [model_file]
 
     options:
-    -l <lambda>: set regularization cost (default 0.1)
-    -k <factor>: set number of latent factors (default 8)
+    -x <solver>: specify the type of solver (default 0)
+      for real-valued matrix factorization
+         0 -- squared loss matrix factorization
+         1 -- absolute loss matrix factorization
+         2 -- generalized KL-divergence (NMF only)
+      for binary matrix factorization
+         5 -- logistic matrix factorization
+         6 -- maximum-margin matrix factorization with squared hinge loss
+         7 -- maximum-margin matrix factorization with hinge loss
+      for one-class matrix factorization
+        10 -- row-oriented Bayesian personalized ranking
+        11 -- column-oriented Bayesian personalized ranking
+    -l1 <lambda>,<lambda>: set L1-regularization parameters for P and Q
+        (default 0). If only one lambda is specified, P and Q share the same
+        lambda.
+    -l2 <lambda>,<lambda>: set L2-regularization parameters for P and Q
+        (default 0.1). If only one lambda is specified, P and Q share the
+        same lambda.
+    -k <dimensions>: set number of dimensions (default 8)
     -t <iter>: set number of iterations (default 20)
-    -r <eta>: set learning rate (default 0.1)
+    -r <eta>: set initial learning rate (default 0.1)
     -s <threads>: set number of threads (default 12)
-    -p <path>: set path to validation set
+    -p <path>: set path to the validation set
     -v <fold>: set number of folds for cross validation
     --quiet: quiet mode (no outputs)
     --nmf: perform non-negative matrix factorization
+    --disk: perform disk-level training (will create a buffer file)
 
-    In the training process, the following information is printed on the
-    screen:
+    `mf-train' is the main training command of LIBMF. At each iteration, the
+    following information is printed.
 
         - iter: the index of iteration
-        - tr_rmse: RMSE in the training set
-        - va_rmse: RMSE in the validation set if `-p' is specified
+        - tr_xxxx: xxxx is the used evaluation criterion in the training set
+        - va_xxxx: xxxx in the validation set if `-p' is specified
         - obj: objective function value
 
-    Here `tr_rmse' and `obj' are estimation because calculating true values can
-    be time-consuming. In the end of training process the true tr_rmse is
-    printed.
-    
+    Here `tr_xxxx' and `obj' are estimations because calculating true values
+    can be time-consuming.
+
+    For different solvers, their criteria are listed below.
+
+          <solver>: <evaluation criterion>
+        -        0: root mean square error (RMSE)
+        -        1: mean absolute error (MAE)
+        -        2: generalized KL-divergence
+        -        5: logarithmic loss
+        -    6 & 7: accuracy
+        -  10 & 11: pair-wise logarithmic loss
+
 -   `mf-predict'
 
-    usage: mf-predict test_file model_file output_file
+    usage: mf-predict [options] test_file model_file output_file
+
+    options:
+    -e <criterion>: set the evaluation criterion (default 0)
+         0: root mean square error
+         1: mean absolute error
+         2: generalized KL-divergence
+         5: logarithmic loss
+         6: accuracy
+        10: row-oriented mean percentile rank (row-oriented MPR)
+        11: colum-oriented mean percentile rank (column-oriented MPR)
+        12: row-oriented area under ROC curve (row-oriented AUC)
+        13: column-oriented area under ROC curve (column-oriented AUC)
+
+    `mf-predict' outputs the prediction values of the entries specified in
+    `test_file' to the `output_file.' The selected criterion will be printed
+    as well.
 
 
 
 Examples
 ========
+This section gives example commands of LIBMF using the data sets in `demo'
+directory. In `demo,' a shell script `demo.sh' can be run for demonstration.
 
 > mf-train bigdata.tr.txt model
 
 train a model using the default parameters
 
-> mf-train -l 0.5 -k 16 -t 30 -r 0.05 -s 4 bigdata.tr.txt model
+> mf-train -l1 0.05 -l2 0.01 bigdata.tr.txt model
 
-train a model using the following parameters:
+train a model with the following regularization coefficients:
 
-    regularization cost = 0.5
-    latent factors = 16
+    coefficient of L1-norm regularization on P = 0.05
+    coefficient of L1-norm regularization on Q = 0.05
+    coefficient of L2-norm regularization on P = 0.01
+    coefficient of L2-norm regularization on Q = 0.01
+
+> mf-train -l1 0.05,0 -l2 0.01,0.03 bigdata.tr.txt model
+
+train a model with the following regularization coefficients:
+
+    coefficient of L1-norm regularization on P = 0.05
+    coefficient of L1-norm regularization on Q = 0
+    coefficient of L2-norm regularization on P = 0.01
+    coefficient of L2-norm regularization on Q = 0.03
+
+> mf-train -x 5 -l1 0,0.02 -k 100 -t 30 -r 0.02 -s 4 bigdata_bin.tr.txt model
+
+train a logistic matrix factorization model with the following parameters:
+
+    coefficient of L1-norm regularization on P = 0
+    coefficient of L1-norm regularization on Q = 0.02
+    latent factors = 100
     iterations = 30
-    learning rate = 0.05
+    learning rate = 0.02
     threads = 4
 
 > mf-train -p bigdata.te.txt bigdata.tr.txt model
 
-use bigdata.te.txt as validation set
+use bigdata.te.txt for hold-out validation
 
 > mf-train -v 5 bigdata.tr.txt
 
 do five fold cross validation
 
-> mf-train --nmf bigdata.tr.txt
+> mf-train -x 2 --nmf bigdata.tr.txt
 
-do non-negative matrix factorization
+do non-negative matrix factorization with generalized KL-divergence
 
 > mf-train --quiet bigdata.tr.txt
 
 do not print message to screen
 
+> mf-train --disk bigdata.tr.txt
+
+do disk-level training
+
 > mf-predict bigdata.te.txt model output
 
 do prediction
+
+> mf-predict -e 1 bigdata.te.txt model output
+
+do prediction and output the mean absolute error
 
 
 
@@ -123,12 +250,19 @@ Library Usage
 
 These structures and functions are declared in the header file `mf.h.' You need
 to #include `mf.h' in your C/C++ source files and link your program with
-`mf.cpp.' You can see `mf-train.c' and `mf-predict.c' for examples showing how
-to use them.
+`mf.cpp.' Users can read `mf-train.cpp' and `mf-predict.cpp' as usage examples.
 
-Before you predict test data, you need to construct a model (`mf_model') using
-training data. A model can also be saved in a file for later use. Once a model
-is available, you can use it to predict new data.
+Before predicting test data, we need to construct a model (`mf_model') using
+training data which is either the C structure `mf_problem' or the path to the
+training file. For the first case, the whole data set needs to be loaded into
+memory. For the second case, a binary version of the training file will be
+created, and only some parts of the binary file are loaded at one time. Note
+that a model can also be saved in a file for later use. To evaluate the quality
+of a model, users can call an evaluation function in LIBMF with a `mf_problem'
+and a `mf_model.'
+
+Notice: LIBMF assumes that the model (and the validation set, if specified)
+can be fully loaded into the memory.
 
 
 There are four public data structures in LIBMF.
@@ -160,63 +294,83 @@ There are four public data structures in LIBMF.
 
 -   struct mf_parameter
     {
-        mf_int k; 
+        mf_int solver;
+        mf_int k;
         mf_int nr_threads;
         mf_int nr_bins;
         mf_int nr_iters;
-        mf_float lambda; 
+        mf_float lambda_p1;
+        mf_float lambda_q1;
+        mf_float lambda_p2;
+        mf_float lambda_q2;
         mf_float eta;
         bool do_nmf;
-        bool quiet; 
+        bool quiet;
         bool copy_data;
     };
 
     `mf_parameter' represents the parameters used for training. The meaning of
     each variable is:
 
-    variable      meaning                             default
-    =========================================================
-    k             number of latent factors                  8
-    nr_threads    number of threads used                   12
-    nr_bins       number of blocks                         20
-    nr_iters      number of iterations                     20
-    lambda        regularization cost                     0.1
-    eta           learning rate                           0.1
-    do_nmf        perform NMF                           false
-    quiet         no outputs to stdout                  false
-    copy_data     copy data in training procedure        true
+    variable      meaning                                    default
+    ================================================================
+    solver        the type of solver                               0
+    k             number of latent factors                         8
+    nr_threads    number of threads used                          12
+    nr_bins       number of blocks                                20
+    nr_iters      number of iterations                            20
+    lambda_p1     coefficient of L1-norm regularization on P       0
+    lambda_q1     coefficient of L1-norm regularization on Q       0
+    lambda_p2     coefficient of L2-norm regularization on P     0.1
+    lambda_q2     coefficient of L2-norm regularization on Q     0.1
+    eta           learning rate                                  0.1
+    do_nmf        perform non-negative MF (NMF)                false
+    quiet         no outputs to stdout                         false
+    copy_data     copy data in training procedure               true
 
-    In LIBMF, we parallelize the computation by gridding the data matrix into
+    In LIBMF, we parallelize the computation by griding the data matrix into
     blocks. `nr_bins' is used to set the number of blocks. According to our
     experiments, this parameter is insensitive to both effectiveness and
     efficiency. In most cases the default value should work well.
 
-    By default, at the beginning of the training procedure, the data matrix is
-    copied because it is modified in the training process. To save memory,
-    `copy_data' can be set to false with the following effects.
-    
+    For on-disk training, `nr_bins' controls the memory usage of because one
+    thread requires an entire block at one time. If `nr_bins' is 4 and
+    `nr_threads' is 2, the expected usage of memory is 12.5% of the memory to
+    store the whole training matrix.
+
+    Let the training data is a `mf_problem.' By default, at the beginning of
+    the training procedure, the data matrix is copied because it is modified in
+    the training process. To save memory, `copy_data' can be set to false with
+    the following effects.
+
         (1) The raw data is directly used without being copied.
         (2) The order of nodes may be changed.
         (3) The value in each node may become slightly different.
 
+    Note that `copy_data' is invalid for disk-level training.
+
     To obtain a parameter with default values, use the function
     `get_default_parameter.'
 
+
 -   struct mf_model
     {
+        mf_int solver;
         mf_int m;
         mf_int n;
         mf_int k;
+        mf_float b;
         mf_float *P;
         mf_float *Q;
     };
 
-    `mf_model' is used to store models in LIBMF. `m' represents the number of
-    rows, `n' represents the number of columns, and `k' represents the number
-    of latent factors. `P' is used to store a kxm matrix in column oriented
-    format. For example, if `P' stores a 3x4 matrix, then the content of `P'
-    is:
-        
+    `mf_model' is used to store models in LIBMF. `solver' specifies the solver
+    which produces the model. `m' represents the number of rows, `n' represents
+    the number of columns, `k' represents the number of latent factors, and `b'
+    is the average value of all elements in the training matrix. `P' is used to
+    store a kxm matrix in column oriented format.  For example, if `P' stores a
+    3x4 matrix, then the content of `P' is:
+
         P11 P21 P31 P12 P22 P32 P13 P23 P33 P14 P24 P34
 
     `Q' is used to store a kxn matrix in the same manner.
@@ -230,7 +384,7 @@ Functions available in LIBMF include:
     Get default parameters.
 
 -   mf_int mf_save_model(struct mf_model const *model, char const *path);
-    
+
     Save a model. It returns 0 on sucess and 1 on failure.
 
 -   struct mf_model* mf_load_model(char const *path);
@@ -238,33 +392,91 @@ Functions available in LIBMF include:
     Load a model. If the model could not be loaded, a nullptr is returned.
 
 -   void mf_destroy_model(struct mf_model **model);
-    
+
     Destroy a model.
 
 -   struct mf_model* mf_train(
-        struct mf_problem const *prob, 
+        struct mf_problem const *prob,
         mf_parameter param);
 
-    Train a model.
+    Train a model. A nullptr is returned if fail.
+
+-   struct mf_model* mf_train_on_disk(
+        char const *tr_path,
+        mf_parameter param);
+
+    Train a model using disk for reducing memory usage. A nullptr is returned
+    if fail.
 
 -   struct mf_model* mf_train_with_validation(
-        struct mf_problem const *Tr, 
-        struct mf_problem const *Va, 
+        struct mf_problem const *Tr,
+        struct mf_problem const *Va,
         mf_parameter param);
 
-    Train a model with training set `Tr' and validation set `Va.' The RMSE of
-    the validation set is printed at each iteration.
-    
+    Train a model with training set `Tr' and validation set `Va.' The
+    evaluation criterion of the validation set is printed at each iteration.
+
+-   struct mf_model* mf_train_with_validation_on_disk(
+        char const *tr_path,
+        char const *va_path,
+        mf_parameter param);
+
+    Train a model with the training file `tr_path' and validation file
+    `va_path.' Use the same strategy to save memory as in `mf_train_on_disk.'
+    It also printed the same information as `mf_train_with_validation.'
+
 -   mf_float mf_cross_validation(
-        struct mf_problem const *prob, 
-        mf_int nr_folds, 
+        struct mf_problem const *prob,
+        mf_int nr_folds,
         mf_parameter param);
 
     Do cross validation with `nr_folds' folds.
 
--   mf_float mf_predict(struct mf_model const *model, mf_int p_idx, mf_int q_idx);
+-   mf_float mf_predict(
+        struct mf_model const *model,
+        mf_int p_idx,
+        mf_int q_idx);
 
-    Predict the value at the position (p_idx, q_idx).
+    Predict the value at the position (p_idx, q_idx). The predicted value is a
+    real number when the solver type is real-valued MF or one-class MF. For
+    binary MF solvers, the predicted value is also binary. If `p_idx' or
+    `q_idx' can not be found in the training data, the function returns the
+    average (mode if binary MF) of all values in the training matrix.
+
+-   mf_double calc_rmse(mf_problem *prob, mf_model *model);
+
+    calculate the RMSE of the model on a test set `prob.' It can be used to
+    evaluate the result of real-valued MF.
+
+-   mf_double calc_mae(mf_problem *prob, mf_model *model);
+
+    calculate the MAE of the model on a test set `prob.' It can be used to
+    evaluate the result of real-valued MF.
+
+-   mf_double calc_gkl(mf_problem *prob, mf_model *model);
+
+    calculate the Generalized KL-divergence of the model on a test set `prob.'
+    It can be used to evaluate the result of real-valued NMF.
+
+-   calc_logloss(mf_problem *prob, mf_model *model);
+
+    calculate the logarithmic loss of the model on a test `prob.' It can be
+    used to evaluate the result of binary MF.
+
+-   mf_double calc_accuracy(mf_problem *prob, mf_model *model);
+
+    calculate the accuracy of the model on a test `prob.' It can be used to
+    evaluate the result of binary MF.
+
+-   calc_mpr(mf_problem *prob, mf_model *model);
+
+    calculate the MPR of the model on a test `prob.' It can be used to
+    evaluate the result of one-class MF.
+
+-   calc_auc(mf_problem *prob, mf_model *model);
+
+    calculate the AUC of the model on a test `prob.' It can be used to
+    evaluate the result of one-class MF.
 
 
 
@@ -278,19 +490,23 @@ use SSE on your platform, then please comment out
 
 in Makefile to disable SSE.
 
-Some modern CPUs support AVX, which is more powerful than SSE. To enable
-AVX, please uncomment the following lines in Makefile.
+Some modern CPUs support AVX, which is more powerful than SSE. To enable AVX,
+please comment out
+
+    DFLAG = -DUSESSE
+
+and uncomment the following lines in Makefile.
 
     DFLAG = -DUSEAVX
     CFLAGS += -mavx
 
-If OpenMP is not available on your platform, then please comment out the
-following lines in Makefile.
+If OpenMP is not available on your platform, please comment out the following
+lines in Makefile.
 
     DFLAG += -DUSEOMP
     CXXFLAGS += -fopenmp
 
-Note: Please always run `make clean all' if these flags are changed.
+Notice: Please always run `make clean all' if these flags are changed.
 
 
 
@@ -308,8 +524,8 @@ Building Windows and Mac and Binaries
 
     "C:\Program Files (x86)\Microsoft Visual Studio 12.0\VC\bin\amd64\vcvars64.bat"
 
-    You may have to modify the above command according which version of VC++
-    or where it is installed.
+    You may have to modify the above command according which version of VC++ or
+    where it is installed.
 
     2. Type
 
@@ -320,14 +536,14 @@ Building Windows and Mac and Binaries
     nmake -f Makefile.win lib
 
 -   Mac
-    
+
     To complie LIBMF on Mac, a GCC complier is required, and users need to
     slightly modify the Makefile. The following instructions are tested with
     GCC 4.9.
 
     1. Set the complier path to your GCC complier. For example, the first
        line in the Makefile can be
-   
+
        CXX = g++-4.9
 
     2. Remove `-march=native' from `CXXFLAGS.' The second line in the Makefile
@@ -339,7 +555,7 @@ Building Windows and Mac and Binaries
        `CXXFLAGS' becomes
 
        CXXFLAGS = -O3 -pthread -std=c++0x -Wa,-q
-  
+
 
 
 References
