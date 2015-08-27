@@ -624,7 +624,7 @@ mf_double Utility::calc_error(mf_node const *R, mf_long const size,
                               mf_model const &model)
 {
     mf_double error = 0;
-    if(solver == P_L2_MFR || solver == P_L1_MFR || solver == P_L1_MFR ||
+    if(solver == P_L2_MFR || solver == P_L1_MFR || solver == P_KL_MFR ||
        solver == P_LR_MFC || solver == P_L2_MFC || solver == P_L1_MFC)
     {
 #if defined USEOMP
