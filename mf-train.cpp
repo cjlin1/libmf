@@ -50,7 +50,7 @@ string train_help()
 "-t <iter>: set number of iterations (default 20)\n"
 "-r <eta>: set learning rate (default 0.1)\n"
 "-s <threads>: set number of threads (default 12)\n"
-"-n <blocks>: set number of blocks (may be adjusted by LIBMF)\n"
+"-n <bins>: set number of bins (may be adjusted by LIBMF)\n"
 "-p <path>: set path to the validation set\n"
 "-v <fold>: set number of folds for cross validation\n"
 "--quiet: quiet mode (no outputs)\n"
@@ -213,11 +213,7 @@ Option parse_option(int argc, char **argv)
 
             if(!is_numerical(argv[i]))
                 throw invalid_argument("-n should be followed by a number");
-            mf_int nr_blocks = atoi(argv[i]);
-
-            if(nr_blocks < 1)
-                throw invalid_argument("number of blocks must be positive");
-            option.param.nr_bins = (mf_int)ceil(sqrt(nr_blocks));
+            option.param.nr_bins = atoi(argv[i]);
         }
         else if(args[i].compare("--nmf") == 0)
         {
