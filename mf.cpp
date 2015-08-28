@@ -671,7 +671,7 @@ mf_double Utility::calc_error(mf_node const *R, mf_long const size,
         {
             case P_ROW_BPR_MFOC:
             {
-                uniform_int_distribution<mf_int> distribution;(0, model.n-1);
+                uniform_int_distribution<mf_int> distribution(0, model.n-1);
                 for(mf_long i = 0; i < size; i++)
                 {
                     mf_node const &N = R[i];
@@ -683,7 +683,7 @@ mf_double Utility::calc_error(mf_node const *R, mf_long const size,
             }
             case P_COL_BPR_MFOC:
             {
-                uniform_int_distribution<mf_int> distribution;(0, model.m-1);
+                uniform_int_distribution<mf_int> distribution(0, model.m-1);
                 for(mf_long i = 0; i < size; i++)
                 {
                     mf_node const &N = R[i];
