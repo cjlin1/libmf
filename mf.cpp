@@ -671,7 +671,7 @@ mf_double Utility::calc_error(mf_node const *R, mf_long const size,
         {
             case P_ROW_BPR_MFOC:
             {
-                uniform_int_distribution<mf_int> distribution;(0, model.n-1);
+                uniform_int_distribution<mf_int> distribution(0, model.n-1);
                 for(mf_long i = 0; i < size; i++)
                 {
                     mf_node const &N = R[i];
@@ -683,7 +683,7 @@ mf_double Utility::calc_error(mf_node const *R, mf_long const size,
             }
             case P_COL_BPR_MFOC:
             {
-                uniform_int_distribution<mf_int> distribution;(0, model.m-1);
+                uniform_int_distribution<mf_int> distribution(0, model.m-1);
                 for(mf_long i = 0; i < size; i++)
                 {
                     mf_node const &N = R[i];
@@ -1072,30 +1072,83 @@ mf_problem* Utility::copy_problem(mf_problem const *prob, bool copy_data)
 
     return new_prob;
 }
+#if defined USESSE
+void calc_z(__m128 &XMMz, __m128d &XMMloss, __m128d &XMMerror, __m128 &XMMrk, mf_int k,
+        mf_float *p, mf_float *q)
+{
+    XMMrk = _mm_set1_ps(1.0/kALIGN);
+    XMMz = _mm_setzero_ps();
+    for(mf_int d = 0; d < k; d+= 4)
+        XMMz = _mm_add_ps(XMMz, _mm_mul_ps(
+               _mm_load_ps(p+d), _mm_load_ps(q+d)));
+}
+#elif defined USEAVX
+void calc_z(__m256 &XMMz, __m128d &XMMloss, __m128d &XMMerror, __m256 &XMMrk, mf_int k,
+        mf_float *p, mf_float *q)
+{
+    XMMrk = _mm256_set1_ps(1.0/kALIGN);
+    XMMz = _mm256_setzero_ps();
+    for(mf_int d = 0; d < k; d+= 8)
+        XMMz = _mm256_add_ps(XMMz, _mm256_mul_ps(
+               _mm256_load_ps(p+d), _mm256_load_ps(q+d)));
+}
+#else
+void calc_z(mf_float &z, mf_double &loss, mf_double &error, mf_float &rk, mf_int k,
+        mf_float *p, mf_float *q)
+{
+    rk = 1.0/kALIGN;
+    z = 0;
+    for(mf_int d = 0; d < k; d++)
+        z += p[d]*q[d];
+}
+#endif
 
 class SolverBase
 {
 public:
-    SolverBase(Scheduler &scheduler, BlockBase* blocks,
+    SolverBase(Scheduler &scheduler, BlockBase *block,
                mf_float *PG, mf_float *QG, mf_model &model,
                mf_parameter param, bool &slow_only);
-    virtual ~SolverBase();
     void run();
     SolverBase(const SolverBase&) = delete;
     SolverBase& operator=(const SolverBase&) = delete;
 
 protected:
-    void run_one();
+#if defined USESSE
+    virtual void init_params(__m128 &XMMlambda_p1, __m128 &XMMlambda_q1,
+            __m128 &XMMlambda_p2, __m128 &XMMlabmda_q2, __m128 &XMMeta);
+    virtual void initialize(__m128d &XMMloss, __m128d &XMMerror);
+    virtual void prepare(__m128 &XMMz, __m128d &XMMloss, __m128d &XMMerror, __m128 &XMMrk)=0;
+    virtual void sg_update(mf_int d_begin, mf_int d_end, __m128 XMMz,
+            __m128 XMMlambda_p1, __m128 XMMlambda_q1, __m128 XMMlambda_p2, __m128 XMMlamdba_q2,
+            __m128 XMMeta, __m128 XMMrk)=0;
+    virtual void update(__m128 &XMMrk);
+    virtual void finalize(__m128d XMMloss, __m128d XMMerror);
+#elif defined USEAVX
+    virtual void init_params(__m256 &XMMlambda_p1, __m256 &XMMlambda_q1,
+            __m256 &XMMlambda_p2, __m256 &XMMlabmda_q2, __m256 &XMMeta);
+    virtual void initialize(__m128d &XMMloss, __m128d &XMMerror);
+    virtual void prepare(__m256 &XMMz, __m128d &XMMloss, __m128d &XMMerror, __m256 &XMMrk)=0;
+    virtual void sg_update(mf_int d_begin, mf_int d_end, __m256 XMMz,
+            __m256 XMMlambda_p1, __m256 XMMlambda_q1, __m256 XMMlambda_p2, __m256 XMMlamdba_q2,
+            __m256 XMMeta, __m256 XMMrk)=0;
+    virtual void update(__m256 &XMMrk);
+    virtual void finalize(__m128d XMMloss, __m128d XMMerror);
+#else
+    virtual void init_params();
     virtual void initialize();
-    virtual void prepare();
+    virtual void prepare()=0;
     virtual void sg_update(mf_int d_begin, mf_int d_end)=0;
     virtual void update();
     virtual void finalize();
+#endif
 
     Scheduler &scheduler;
     BlockBase *block;
     mf_float *PG;
     mf_float *QG;
+    mf_float *Q;
+    mf_float *P;
     mf_model &model;
     mf_parameter param;
     bool &slow_only;
@@ -1110,187 +1163,193 @@ protected:
     mf_float *qG;
     mf_int bid;
 
-#if defined USEAVX
-    __m128d *XMMloss;
-    __m128d *XMMerror;
-    __m256 *XMMz;
-    __m256 *XMMlambda_p1;
-    __m256 *XMMlambda_q1;
-    __m256 *XMMlambda_p2;
-    __m256 *XMMlambda_q2;
-    __m256 *XMMeta;
-    __m256 *XMMrk;
-#elif defined USESSE
-    __m128d *XMMloss;
-    __m128d *XMMerror;
-    __m128 *XMMz;
-    __m128 *XMMlambda_p1;
-    __m128 *XMMlambda_q1;
-    __m128 *XMMlambda_p2;
-    __m128 *XMMlambda_q2;
-    __m128 *XMMeta;
-    __m128 *XMMrk;
-#else
     mf_float lambda_p1;
     mf_float lambda_q1;
     mf_float lambda_p2;
     mf_float lambda_q2;
     mf_float rk;
     static float qrsqrt(float x);
-#endif
 };
 
-SolverBase::SolverBase(Scheduler &scheduler, BlockBase* block,
+SolverBase::SolverBase(Scheduler &scheduler, BlockBase *block,
     mf_float *PG, mf_float *QG, mf_model &model, mf_parameter param,
     bool &slow_only) : scheduler(scheduler), block(block), PG(PG), QG(QG),
                        model(model), param(param), slow_only(slow_only)
-{
-#if defined USEAVX
-        XMMloss = (__m128d*)Utility::malloc_aligned_float(4);
-        XMMerror = (__m128d*)Utility::malloc_aligned_float(4);
-        XMMz = (__m256*)Utility::malloc_aligned_float(8);
-        XMMlambda_p1 = (__m256*)Utility::malloc_aligned_float(8);
-        XMMlambda_q1 = (__m256*)Utility::malloc_aligned_float(8);
-        XMMlambda_p2 = (__m256*)Utility::malloc_aligned_float(8);
-        XMMlambda_q2 = (__m256*)Utility::malloc_aligned_float(8);
-        XMMeta = (__m256*)Utility::malloc_aligned_float(8);
-        XMMrk = (__m256*)Utility::malloc_aligned_float(8);
-#elif defined USESSE
-        XMMloss = (__m128d*)Utility::malloc_aligned_float(4);
-        XMMerror = (__m128d*)Utility::malloc_aligned_float(4);
-        XMMz = (__m128*)Utility::malloc_aligned_float(4);
-        XMMlambda_p1 = (__m128*)Utility::malloc_aligned_float(4);
-        XMMlambda_q1 = (__m128*)Utility::malloc_aligned_float(4);
-        XMMlambda_p2 = (__m128*)Utility::malloc_aligned_float(4);
-        XMMlambda_q2 = (__m128*)Utility::malloc_aligned_float(4);
-        XMMeta = (__m128*)Utility::malloc_aligned_float(4);
-        XMMrk = (__m128*)Utility::malloc_aligned_float(4);
-#endif
-}
+{}
 
-SolverBase::~SolverBase()
-{
-#if defined(USEAVX) || defined(USESSE)
-#ifdef _WIN32
-    _aligned_free(XMMloss);
-    _aligned_free(XMMerror);
-    _aligned_free(XMMz);
-    _aligned_free(XMMlambda_p1);
-    _aligned_free(XMMlambda_q1);
-    _aligned_free(XMMlambda_p2);
-    _aligned_free(XMMlambda_q2);
-    _aligned_free(XMMeta);
-    _aligned_free(XMMrk);
-#else
-    free(XMMloss);
-    free(XMMerror);
-    free(XMMz);
-    free(XMMlambda_p1);
-    free(XMMlambda_q1);
-    free(XMMlambda_p2);
-    free(XMMlambda_q2);
-    free(XMMeta);
-    free(XMMrk);
-#endif
-#endif
-}
-
+#if defined USESSE
 inline void SolverBase::run()
 {
+    __m128d XMMloss;
+    __m128d XMMerror;
+    __m128 XMMz;
+    __m128 XMMrk;
+    __m128 XMMlambda_p1;
+    __m128 XMMlambda_q1;
+    __m128 XMMlambda_p2;
+    __m128 XMMlambda_q2;
+    __m128 XMMeta;
+    init_params(XMMlambda_p1, XMMlambda_q1, XMMlambda_p2, XMMlambda_q2, XMMeta);
     while(!scheduler.is_terminated())
-        run_one();
-}
-
-inline void SolverBase::run_one()
-{
-    initialize();
-    while(block->move_next())
     {
-        N = block->get_current();
-        p = model.P+(mf_long)N->u*model.k;
-        q = model.Q+(mf_long)N->v*model.k;
-        pG = PG+N->u*2;
-        qG = QG+N->v*2;
-        prepare();
-        sg_update(0, kALIGN);
-        if(slow_only)
-            continue;
-        update();
-        sg_update(kALIGN, model.k);
+        initialize(XMMloss, XMMerror);
+        while(block->move_next())
+        {
+            N = block->get_current();
+            p = P+(mf_long)N->u*model.k;
+            q = Q+(mf_long)N->v*model.k;
+            pG = PG+N->u*2;
+            qG = QG+N->v*2;
+            prepare(XMMz,XMMloss,XMMerror, XMMrk);
+            sg_update(0, kALIGN, XMMz, XMMlambda_p1, XMMlambda_q1,
+                    XMMlambda_p2, XMMlambda_q2, XMMeta, XMMrk);
+            if(slow_only)
+                continue;
+            update(XMMrk);
+            sg_update(kALIGN, model.k, XMMz, XMMlambda_p1, XMMlambda_q1,
+                    XMMlambda_p2, XMMlambda_q2, XMMeta, XMMrk);
+        }
+        finalize(XMMloss, XMMerror);
     }
-    finalize();
 }
-
-inline void SolverBase::update()
-{
-#if defined USESSE
-    *XMMrk = _mm_set1_ps((mf_float)1.0/(model.k-kALIGN));
 #elif defined USEAVX
-    *XMMrk = _mm256_set1_ps((mf_float)1.0/(model.k-kALIGN));
+inline void SolverBase::run()
+{
+    __m128d XMMloss;
+    __m128d XMMerror;
+    __m256 XMMz;
+    __m256 XMMrk;
+    __m256 XMMlambda_p1;
+    __m256 XMMlambda_q1;
+    __m256 XMMlambda_p2;
+    __m256 XMMlambda_q2;
+    __m256 XMMeta;
+    init_params(XMMlambda_p1, XMMlambda_q1, XMMlambda_p2, XMMlambda_q2, XMMeta);
+    while(!scheduler.is_terminated())
+    {
+        initialize(XMMloss, XMMerror);
+        while(block->move_next())
+        {
+            N = block->get_current();
+            p = P+(mf_long)N->u*model.k;
+            q = Q+(mf_long)N->v*model.k;
+            pG = PG+N->u*2;
+            qG = QG+N->v*2;
+            prepare(XMMz,XMMloss,XMMerror, XMMrk);
+            sg_update(0, kALIGN, XMMz, XMMlambda_p1, XMMlambda_q1,
+                    XMMlambda_p2, XMMlambda_q2, XMMeta, XMMrk);
+            if(slow_only)
+                continue;
+            update(XMMrk);
+            sg_update(kALIGN, model.k, XMMz, XMMlambda_p1, XMMlambda_q1,
+                    XMMlambda_p2, XMMlambda_q2, XMMeta, XMMrk);
+        }
+        finalize(XMMloss, XMMerror);
+    }
+}
 #else
-    rk = (mf_float)1.0/(model.k-kALIGN);
+inline void SolverBase::run()
+{
+    init_params();
+    while(!scheduler.is_terminated())
+    {
+        initialize();
+        while(block->move_next())
+        {
+            N = block->get_current();
+            p = P+(mf_long)N->u*model.k;
+            q = Q+(mf_long)N->v*model.k;
+            pG = PG+N->u*2;
+            qG = QG+N->v*2;
+            prepare();
+            sg_update(0, kALIGN);
+            if(slow_only)
+                continue;
+            update();
+            sg_update(kALIGN, model.k);
+        }
+        finalize();
+    }
+}
 #endif
+
+
+#if defined USESSE
+inline void SolverBase::update(__m128 &XMMrk)
+{
+    XMMrk = _mm_set1_ps((mf_float)1.0/(model.k-kALIGN));
     pG++;
     qG++;
 }
+#elif defined USEAVX
+inline void SolverBase::update(__m256 &XMMrk)
+{
+    XMMrk = _mm256_set1_ps((mf_float)1.0/(model.k-kALIGN));
+    pG++;
+    qG++;
+}
+#else
+inline void SolverBase::update()
+{
+    rk = (mf_float)1.0/(model.k-kALIGN);
+    pG++;
+    qG++;
+}
+#endif
 
 #if defined USESSE
-inline void SolverBase::initialize()
+inline void SolverBase::init_params(__m128 &XMMlambda_p1, __m128 &XMMlambda_q1,
+        __m128 &XMMlambda_p2, __m128 &XMMlambda_q2, __m128 &XMMeta)
 {
-    *XMMlambda_p1 = _mm_set1_ps(param.lambda_p1);
-    *XMMlambda_q1 = _mm_set1_ps(param.lambda_q1);
-    *XMMlambda_p2 = _mm_set1_ps(param.lambda_p2);
-    *XMMlambda_q2 = _mm_set1_ps(param.lambda_q2);
-    *XMMeta = _mm_set1_ps(param.eta);
-    *XMMloss = _mm_setzero_pd();
-    *XMMerror = _mm_setzero_pd();
+    XMMlambda_p1 = _mm_set1_ps(param.lambda_p1);
+    XMMlambda_q1 = _mm_set1_ps(param.lambda_q1);
+    XMMlambda_p2 = _mm_set1_ps(param.lambda_p2);
+    XMMlambda_q2 = _mm_set1_ps(param.lambda_q2);
+    XMMeta = _mm_set1_ps(param.eta);
+    P = model.P;
+    Q = model.Q;
+}
+inline void SolverBase::initialize(__m128d &XMMloss, __m128d &XMMerror)
+{
+    XMMloss = _mm_setzero_pd();
+    XMMerror = _mm_setzero_pd();
     bid = scheduler.get_job();
     block->reload(bid);
 }
 
-inline void SolverBase::prepare()
+inline void SolverBase::finalize(__m128d XMMloss, __m128d XMMerror)
 {
-    *XMMrk = _mm_set1_ps(1.0/kALIGN);
-    *XMMz = _mm_setzero_ps();
-    for(mf_int d = 0; d < model.k; d+= 4)
-        *XMMz = _mm_add_ps(*XMMz, _mm_mul_ps(
-               _mm_load_ps(p+d), _mm_load_ps(q+d)));
-}
-
-inline void SolverBase::finalize()
-{
-    _mm_store_sd(&loss, *XMMloss);
-    _mm_store_sd(&error, *XMMerror);
+    _mm_store_sd(&loss, XMMloss);
+    _mm_store_sd(&error, XMMerror);
     scheduler.put_job(bid, loss, error);
 }
 
 #elif defined USEAVX
-inline void SolverBase::initialize()
+inline void SolverBase::init_params(__m256 &XMMlambda_p1, __m256 &XMMlambda_q1,
+        __m256 &XMMlambda_p2, __m256 &XMMlambda_q2, __m256 &XMMeta)
 {
-    *XMMlambda_p1 = _mm256_set1_ps(param.lambda_p1);
-    *XMMlambda_q1 = _mm256_set1_ps(param.lambda_q1);
-    *XMMlambda_p2 = _mm256_set1_ps(param.lambda_p2);
-    *XMMlambda_q2 = _mm256_set1_ps(param.lambda_q2);
-    *XMMeta = _mm256_set1_ps(param.eta);
-    *XMMloss = _mm_setzero_pd();
-    *XMMerror = _mm_setzero_pd();
+    XMMlambda_p1 = _mm256_set1_ps(param.lambda_p1);
+    XMMlambda_q1 = _mm256_set1_ps(param.lambda_q1);
+    XMMlambda_p2 = _mm256_set1_ps(param.lambda_p2);
+    XMMlambda_q2 = _mm256_set1_ps(param.lambda_q2);
+    XMMeta = _mm256_set1_ps(param.eta);
+    P = model.P;
+    Q = model.Q;
+}
+
+inline void SolverBase::initialize(__m128d &XMMloss, __m128d &XMMerror)
+{
+    XMMloss = _mm_setzero_pd();
+    XMMerror = _mm_setzero_pd();
     bid = scheduler.get_job();
     block->reload(bid);
 }
 
-inline void SolverBase::prepare()
-{
-    *XMMrk = _mm256_set1_ps(1.0/kALIGN);
-    *XMMz = _mm256_setzero_ps();
-    for(mf_int d = 0; d < model.k; d+= 8)
-        *XMMz = _mm256_add_ps(*XMMz, _mm256_mul_ps(
-               _mm256_load_ps(p+d), _mm256_load_ps(q+d)));
-}
 
-inline void SolverBase::finalize()
+inline void SolverBase::finalize(__m128d XMMloss, __m128d XMMerror)
 {
-    _mm_store_sd(&loss, *XMMloss);
-    _mm_store_sd(&error, *XMMerror);
+    _mm_store_sd(&loss, XMMloss);
+    _mm_store_sd(&error, XMMerror);
     scheduler.put_job(bid, loss, error);
 }
 
@@ -1305,25 +1364,22 @@ inline float SolverBase::qrsqrt(float x)
     x = x*(1.5f - xhalf*x*x);
     return x;
 }
-
-inline void SolverBase::initialize()
+inline void SolverBase::init_params()
 {
-    loss = 0.0;
-    error = 0.0;
     lambda_p1 = param.lambda_p1;
     lambda_q1 = param.lambda_q1;
     lambda_p2 = param.lambda_p2;
     lambda_q2 = param.lambda_q2;
+    P = model.P;
+    Q = model.Q;
+}
+inline void SolverBase::initialize()
+{
+    loss = 0.0;
+    error = 0.0;
+    bid = scheduler.get_job();
     bid = scheduler.get_job();
     block->reload(bid);
-}
-
-inline void SolverBase::prepare()
-{
-    rk = 1.0/kALIGN;
-    z = 0;
-    for(mf_int d = 0; d < model.k; d++)
-        z += p[d]*q[d];
 }
 
 inline void SolverBase::finalize()
@@ -1345,16 +1401,28 @@ public:
         : SolverBase(scheduler, block, PG, QG, model, param, slow_only) {}
 
 protected:
+#if defined USESSE
+    void sg_update(mf_int d_begin, mf_int d_end, __m128 XMMz,
+        __m128 XMMlambda_p1, __m128 XMMlambda_q1, __m128 XMMlambda_p2,
+        __m128 XMMlambda_q2, __m128 XMMeta, __m128 XMMrk);
+#elif defined USEAVX
+    void sg_update(mf_int d_begin, mf_int d_end, __m256 XMMz,
+        __m256 XMMlambda_p1, __m256 XMMlambda_q1, __m256 XMMlambda_p2,
+        __m256 XMMlambda_q2, __m256 XMMeta, __m256 XMMrk);
+#else
     void sg_update(mf_int d_begin, mf_int d_end);
+#endif
 };
 
 #if defined USESSE
-inline void MFSolver::sg_update(mf_int d_begin, mf_int d_end)
+inline void MFSolver::sg_update(mf_int d_begin, mf_int d_end, __m128 XMMz,
+            __m128 XMMlambda_p1, __m128 XMMlambda_q1, __m128 XMMlambda_p2,
+            __m128 XMMlambda_q2, __m128 XMMeta, __m128 XMMrk)
 {
     __m128 XMMpG = _mm_load1_ps(pG);
     __m128 XMMqG = _mm_load1_ps(qG);
-    __m128 XMMeta_p = _mm_mul_ps(*XMMeta, _mm_rsqrt_ps(XMMpG));
-    __m128 XMMeta_q = _mm_mul_ps(*XMMeta, _mm_rsqrt_ps(XMMqG));
+    __m128 XMMeta_p = _mm_mul_ps(XMMeta, _mm_rsqrt_ps(XMMpG));
+    __m128 XMMeta_q = _mm_mul_ps(XMMeta, _mm_rsqrt_ps(XMMqG));
     __m128 XMMpG1 = _mm_setzero_ps();
     __m128 XMMqG1 = _mm_setzero_ps();
 
@@ -1363,10 +1431,10 @@ inline void MFSolver::sg_update(mf_int d_begin, mf_int d_end)
         __m128 XMMp = _mm_load_ps(p+d);
         __m128 XMMq = _mm_load_ps(q+d);
 
-        __m128 XMMpg = _mm_sub_ps(_mm_mul_ps(*XMMlambda_p2, XMMp),
-                       _mm_mul_ps(*XMMz, XMMq));
-        __m128 XMMqg = _mm_sub_ps(_mm_mul_ps(*XMMlambda_q2, XMMq),
-                       _mm_mul_ps(*XMMz, XMMp));
+        __m128 XMMpg = _mm_sub_ps(_mm_mul_ps(XMMlambda_p2, XMMp),
+                       _mm_mul_ps(XMMz, XMMq));
+        __m128 XMMqg = _mm_sub_ps(_mm_mul_ps(XMMlambda_q2, XMMq),
+                       _mm_mul_ps(XMMz, XMMp));
 
         XMMpG1 = _mm_add_ps(XMMpG1, _mm_mul_ps(XMMpg, XMMpg));
         XMMqG1 = _mm_add_ps(XMMqG1, _mm_mul_ps(XMMqg, XMMqg));
@@ -1374,35 +1442,52 @@ inline void MFSolver::sg_update(mf_int d_begin, mf_int d_end)
         XMMp = _mm_sub_ps(XMMp, _mm_mul_ps(XMMeta_p, XMMpg));
         XMMq = _mm_sub_ps(XMMq, _mm_mul_ps(XMMeta_q, XMMqg));
 
-        mf_float tmp = 0;
-        _mm_store_ss(&tmp, *XMMlambda_p1);
-        if(tmp > 0)
+        _mm_store_ps(p+d, XMMp);
+        _mm_store_ps(q+d, XMMq);
+    }
+
+    mf_float tmp = 0;
+    _mm_store_ss(&tmp, XMMlambda_p1);
+    if(tmp > 0)
+    {
+        for(mf_int d = d_begin; d < d_end; d += 4)
         {
+            __m128 XMMp = _mm_load_ps(p+d);
             __m128 XMMflip = _mm_and_ps(_mm_cmple_ps(XMMp, _mm_set1_ps(0.0f)),
                              _mm_set1_ps(-0.0f));
             XMMp = _mm_xor_ps(XMMflip,
                    _mm_max_ps(_mm_sub_ps(_mm_xor_ps(XMMp, XMMflip),
-                   _mm_mul_ps(XMMeta_p, *XMMlambda_p1)), _mm_set1_ps(0.0f)));
+                   _mm_mul_ps(XMMeta_p, XMMlambda_p1)), _mm_set1_ps(0.0f)));
+            _mm_store_ps(p+d, XMMp);
         }
+    }
 
-        _mm_store_ss(&tmp, *XMMlambda_q1);
-        if(tmp > 0)
+    _mm_store_ss(&tmp, XMMlambda_q1);
+    if(tmp > 0)
+    {
+        for(mf_int d = d_begin; d < d_end; d += 4)
         {
+            __m128 XMMq = _mm_load_ps(q+d);
             __m128 XMMflip = _mm_and_ps(_mm_cmple_ps(XMMq, _mm_set1_ps(0.0f)),
                              _mm_set1_ps(-0.0f));
             XMMq = _mm_xor_ps(XMMflip,
                    _mm_max_ps(_mm_sub_ps(_mm_xor_ps(XMMq, XMMflip),
-                   _mm_mul_ps(XMMeta_q, *XMMlambda_q1)), _mm_set1_ps(0.0f)));
+                   _mm_mul_ps(XMMeta_q, XMMlambda_q1)), _mm_set1_ps(0.0f)));
+            _mm_store_ps(q+d, XMMq);
         }
+    }
 
-        if(param.do_nmf)
+    if(param.do_nmf)
+    {
+        for(mf_int d = d_begin; d < d_end; d += 4)
         {
+            __m128 XMMp = _mm_load_ps(p+d);
+            __m128 XMMq = _mm_load_ps(q+d);
             XMMp = _mm_max_ps(XMMp, _mm_set1_ps(0.0f));
             XMMq = _mm_max_ps(XMMq, _mm_set1_ps(0.0f));
+            _mm_store_ps(p+d, XMMp);
+            _mm_store_ps(q+d, XMMq);
         }
-
-        _mm_store_ps(p+d, XMMp);
-        _mm_store_ps(q+d, XMMq);
     }
 
     XMMpG1 = _mm_hadd_ps(XMMpG1, XMMpG1);
@@ -1410,19 +1495,21 @@ inline void MFSolver::sg_update(mf_int d_begin, mf_int d_end)
     XMMqG1 = _mm_hadd_ps(XMMqG1, XMMqG1);
     XMMqG1 = _mm_hadd_ps(XMMqG1, XMMqG1);
 
-    XMMpG = _mm_add_ps(XMMpG, _mm_mul_ps(XMMpG1, *XMMrk));
-    XMMqG = _mm_add_ps(XMMqG, _mm_mul_ps(XMMqG1, *XMMrk));
+    XMMpG = _mm_add_ps(XMMpG, _mm_mul_ps(XMMpG1, XMMrk));
+    XMMqG = _mm_add_ps(XMMqG, _mm_mul_ps(XMMqG1, XMMrk));
 
     _mm_store_ss(pG, XMMpG);
     _mm_store_ss(qG, XMMqG);
 }
 #elif defined USEAVX
-inline void MFSolver::sg_update(mf_int d_begin, mf_int d_end)
+inline void MFSolver::sg_update(mf_int d_begin, mf_int d_end, __m256 XMMz,
+            __m256 XMMlambda_p1, __m256 XMMlambda_q1, __m256 XMMlambda_p2,
+            __m256 XMMlambda_q2, __m256 XMMeta, __m256 XMMrk)
 {
     __m256 XMMpG = _mm256_broadcast_ss(pG);
     __m256 XMMqG = _mm256_broadcast_ss(qG);
-    __m256 XMMeta_p = _mm256_mul_ps(*XMMeta, _mm256_rsqrt_ps(XMMpG));
-    __m256 XMMeta_q = _mm256_mul_ps(*XMMeta, _mm256_rsqrt_ps(XMMqG));
+    __m256 XMMeta_p = _mm256_mul_ps(XMMeta, _mm256_rsqrt_ps(XMMpG));
+    __m256 XMMeta_q = _mm256_mul_ps(XMMeta, _mm256_rsqrt_ps(XMMqG));
     __m256 XMMpG1 = _mm256_setzero_ps();
     __m256 XMMqG1 = _mm256_setzero_ps();
 
@@ -1431,53 +1518,70 @@ inline void MFSolver::sg_update(mf_int d_begin, mf_int d_end)
         __m256 XMMp = _mm256_load_ps(p+d);
         __m256 XMMq = _mm256_load_ps(q+d);
 
-        __m256 XMMpg = _mm256_sub_ps(_mm256_mul_ps(*XMMlambda_p2, XMMp),
-                                     _mm256_mul_ps(*XMMz, XMMq));
-        __m256 XMMqg = _mm256_sub_ps(_mm256_mul_ps(*XMMlambda_q2, XMMq),
-                                     _mm256_mul_ps(*XMMz, XMMp));
+        __m256 XMMpg = _mm256_sub_ps(_mm256_mul_ps(XMMlambda_p2, XMMp),
+                                     _mm256_mul_ps(XMMz, XMMq));
+        __m256 XMMqg = _mm256_sub_ps(_mm256_mul_ps(XMMlambda_q2, XMMq),
+                                     _mm256_mul_ps(XMMz, XMMp));
 
         XMMpG1 = _mm256_add_ps(XMMpG1, _mm256_mul_ps(XMMpg, XMMpg));
         XMMqG1 = _mm256_add_ps(XMMqG1, _mm256_mul_ps(XMMqg, XMMqg));
 
         XMMp = _mm256_sub_ps(XMMp, _mm256_mul_ps(XMMeta_p, XMMpg));
         XMMq = _mm256_sub_ps(XMMq, _mm256_mul_ps(XMMeta_q, XMMqg));
+        _mm256_store_ps(p+d, XMMp);
+        _mm256_store_ps(q+d, XMMq);
 
-        mf_float tmp = 0;
-        _mm_store_ss(&tmp, _mm256_castps256_ps128(*XMMlambda_p1));
-        if(tmp > 0)
+    }
+    mf_float tmp = 0;
+    _mm_store_ss(&tmp, _mm256_castps256_ps128(XMMlambda_p1));
+    if(tmp > 0)
+    {
+        for(mf_int d = d_begin; d < d_end; d += 8)
         {
+            __m256 XMMp = _mm256_load_ps(p+d);
             __m256 XMMflip = _mm256_and_ps(_mm256_cmp_ps(XMMp,
                              _mm256_set1_ps(0.0f), _CMP_LE_OS),
                              _mm256_set1_ps(-0.0f));
             XMMp = _mm256_xor_ps(XMMflip,
                    _mm256_max_ps(_mm256_sub_ps(
                    _mm256_xor_ps(XMMp, XMMflip),
-                   _mm256_mul_ps(XMMeta_p, *XMMlambda_p1)),
+                   _mm256_mul_ps(XMMeta_p, XMMlambda_p1)),
                    _mm256_set1_ps(0.0f)));
+            _mm256_store_ps(p+d, XMMp);
         }
+    }
 
-        _mm_store_ss(&tmp, _mm256_castps256_ps128(*XMMlambda_q1));
-        if(tmp > 0)
+    _mm_store_ss(&tmp, _mm256_castps256_ps128(XMMlambda_q1));
+    if(tmp > 0)
+    {
+        for(mf_int d = d_begin; d < d_end; d += 8)
         {
+            __m256 XMMq = _mm256_load_ps(q+d);
             __m256 XMMflip = _mm256_and_ps(_mm256_cmp_ps(XMMq,
                              _mm256_set1_ps(0.0f), _CMP_LE_OS),
                              _mm256_set1_ps(-0.0f));
             XMMq = _mm256_xor_ps(XMMflip,
                    _mm256_max_ps(_mm256_sub_ps(
                    _mm256_xor_ps(XMMq, XMMflip),
-                   _mm256_mul_ps(XMMeta_q, *XMMlambda_q1)),
+                   _mm256_mul_ps(XMMeta_q, XMMlambda_q1)),
                    _mm256_set1_ps(0.0f)));
+            _mm256_store_ps(q+d, XMMq);
         }
+    }
 
-        if(param.do_nmf)
+    if(param.do_nmf)
+    {
+        for(mf_int d = d_begin; d < d_end; d += 8)
         {
+            __m256 XMMp = _mm256_load_ps(p+d);
+            __m256 XMMq = _mm256_load_ps(q+d);
             XMMp = _mm256_max_ps(XMMp, _mm256_set1_ps(0));
             XMMq = _mm256_max_ps(XMMq, _mm256_set1_ps(0));
+            _mm256_store_ps(p+d, XMMp);
+            _mm256_store_ps(q+d, XMMq);
         }
-
-        _mm256_store_ps(p+d, XMMp);
-        _mm256_store_ps(q+d, XMMq);
     }
+
     XMMpG1 = _mm256_add_ps(XMMpG1,
              _mm256_permute2f128_ps(XMMpG1, XMMpG1, 0x1));
     XMMpG1 = _mm256_hadd_ps(XMMpG1, XMMpG1);
@@ -1488,8 +1592,8 @@ inline void MFSolver::sg_update(mf_int d_begin, mf_int d_end)
     XMMqG1 = _mm256_hadd_ps(XMMqG1, XMMqG1);
     XMMqG1 = _mm256_hadd_ps(XMMqG1, XMMqG1);
 
-    XMMpG = _mm256_add_ps(XMMpG, _mm256_mul_ps(XMMpG1, *XMMrk));
-    XMMqG = _mm256_add_ps(XMMqG, _mm256_mul_ps(XMMqG1, *XMMrk));
+    XMMpG = _mm256_add_ps(XMMpG, _mm256_mul_ps(XMMpG1, XMMrk));
+    XMMqG = _mm256_add_ps(XMMqG, _mm256_mul_ps(XMMqG1, XMMrk));
 
     _mm_store_ss(pG, _mm256_castps256_ps128(XMMpG));
     _mm_store_ss(qG, _mm256_castps256_ps128(XMMqG));
@@ -1513,25 +1617,35 @@ inline void MFSolver::sg_update(mf_int d_begin, mf_int d_end)
 
         p[d] -= eta_p*gp;
         q[d] -= eta_q*gq;
+    }
 
-        if(lambda_p1 > 0)
+    if(lambda_p1 > 0)
+    {
+        for(mf_int d = d_begin; d < d_end; d++)
         {
             mf_float p1 = max(abs(p[d])-lambda_p1*eta_p, 0.0f);
             p[d] = p[d] >= 0? p1: -p1;
         }
+    }
 
-        if(lambda_q1 > 0)
+    if(lambda_q1 > 0)
+    {
+        for(mf_int d = d_begin; d < d_end; d++)
         {
             mf_float q1 = max(abs(q[d])-lambda_q1*eta_q, 0.0f);
             q[d] = q[d] >= 0? q1: -q1;
         }
+    }
 
-        if(param.do_nmf)
+    if(param.do_nmf)
+    {
+        for(mf_int d = d_begin; d < d_end; d++)
         {
             p[d] = max(p[d], (mf_float)0.0f);
             q[d] = max(q[d], (mf_float)0.0f);
         }
     }
+
 
     *pG += pG1*rk;
     *qG += qG1*rk;
@@ -1546,89 +1660,100 @@ public:
         : MFSolver(scheduler, block, PG, QG, model, param, slow_only) {}
 
 protected:
+#if defined USESSE
+    void prepare(__m128 &XMMz, __m128d &XMMloss, __m128d &XMMerror, __m128 &XMMrk);
+#elif defined USEAVX
+    void prepare(__m256 &XMMz, __m128d &XMMloss, __m128d &XMMerror, __m256 &XMMrk);
+#else
     void prepare();
+#endif
 };
 
 #if defined USESSE
-inline void L2_MFR::prepare()
+inline void L2_MFR::prepare(__m128 &XMMz, __m128d &XMMloss, __m128d &XMMerror, __m128 &XMMrk)
 {
-    MFSolver::prepare();
-    *XMMz = _mm_hadd_ps(*XMMz, *XMMz);
-    *XMMz = _mm_hadd_ps(*XMMz, *XMMz);
-    *XMMz = _mm_sub_ps(_mm_set1_ps(N->r), *XMMz);
-    *XMMloss = _mm_add_pd(*XMMloss, _mm_cvtps_pd(
-               _mm_mul_ps(*XMMz, *XMMz)));
-    *XMMerror = *XMMloss;
+    calc_z(XMMz,XMMloss,XMMerror, XMMrk, model.k, p, q);
+    XMMz = _mm_hadd_ps(XMMz, XMMz);
+    XMMz = _mm_hadd_ps(XMMz, XMMz);
+    XMMz = _mm_sub_ps(_mm_set1_ps(N->r), XMMz);
+    XMMloss = _mm_add_pd(XMMloss, _mm_cvtps_pd(
+               _mm_mul_ps(XMMz, XMMz)));
+    XMMerror = XMMloss;
 }
 #elif defined USEAVX
-inline void L2_MFR::prepare()
+inline void L2_MFR::prepare(__m256 &XMMz, __m128d &XMMloss, __m128d &XMMerror, __m256 &XMMrk)
 {
-    MFSolver::prepare();
-    *XMMz = _mm256_add_ps(*XMMz, _mm256_permute2f128_ps(*XMMz, *XMMz, 0x1));
-    *XMMz = _mm256_hadd_ps(*XMMz, *XMMz);
-    *XMMz = _mm256_hadd_ps(*XMMz, *XMMz);
-    *XMMz = _mm256_sub_ps(_mm256_set1_ps(N->r), *XMMz);
-    *XMMloss = _mm_add_pd(*XMMloss,
-               _mm_cvtps_pd(_mm256_castps256_ps128(
-               _mm256_mul_ps(*XMMz, *XMMz))));
-    *XMMerror = *XMMloss;
+    calc_z(XMMz, XMMloss, XMMerror, XMMrk, model.k, p, q);
+    XMMz = _mm256_add_ps(XMMz, _mm256_permute2f128_ps(XMMz, XMMz, 0x1));
+    XMMz = _mm256_hadd_ps(XMMz, XMMz);
+    XMMz = _mm256_hadd_ps(XMMz, XMMz);
+    XMMz = _mm256_sub_ps(_mm256_set1_ps(N->r), XMMz);
+    XMMloss = _mm_add_pd(XMMloss,
+              _mm_cvtps_pd(_mm256_castps256_ps128(
+              _mm256_mul_ps(XMMz, XMMz))));
+    XMMerror = XMMloss;
 }
 #else
 inline void L2_MFR::prepare()
 {
-    MFSolver::prepare();
+    calc_z(z, loss, error, rk, model.k, p, q);
     z = N->r-z;
     loss += z*z;
     error = loss;
 }
 #endif
-
 class L1_MFR : public MFSolver
 {
 public:
-    L1_MFR(Scheduler &scheduler, BlockBase* block, mf_float *PG, mf_float *QG,
+    L1_MFR(Scheduler &scheduler, BlockBase *block, mf_float *PG, mf_float *QG,
            mf_model &model, mf_parameter param, bool &slow_only)
-        : MFSolver(scheduler, block, PG, QG, model, param, slow_only) {}
+        : MFSolver(scheduler, block, PG, QG, model, param, slow_only){}
 
 protected:
+#if defined USESSE
+    void prepare(__m128 &XMMz, __m128d &XMMloss, __m128d &XMMerror, __m128 &XMMrk);
+#elif defined USEAVX
+    void prepare(__m256 &XMMz, __m128d &XMMloss, __m128d &XMMerror, __m256 &XMMrk);
+#else
     void prepare();
+#endif
 };
 
 #if defined USESSE
-inline void L1_MFR::prepare()
+inline void L1_MFR::prepare(__m128 &XMMz, __m128d &XMMloss, __m128d &XMMerror, __m128 &XMMrk)
 {
-    MFSolver::prepare();
-    *XMMz = _mm_hadd_ps(*XMMz, *XMMz);
-    *XMMz = _mm_hadd_ps(*XMMz, *XMMz);
-    *XMMz = _mm_sub_ps(_mm_set1_ps(N->r), *XMMz);
-    *XMMloss = _mm_add_pd(*XMMloss, _mm_cvtps_pd(
-               _mm_andnot_ps(_mm_set1_ps(-0.0f), *XMMz)));
-    *XMMerror = *XMMloss;
-    *XMMz = _mm_add_ps(_mm_and_ps(_mm_cmpgt_ps(*XMMz, _mm_set1_ps(0.0f)),
+    calc_z(XMMz,XMMloss,XMMerror, XMMrk, model.k, p, q);
+    XMMz = _mm_hadd_ps(XMMz, XMMz);
+    XMMz = _mm_hadd_ps(XMMz, XMMz);
+    XMMz = _mm_sub_ps(_mm_set1_ps(N->r), XMMz);
+    XMMloss = _mm_add_pd(XMMloss, _mm_cvtps_pd(
+              _mm_andnot_ps(_mm_set1_ps(-0.0f), XMMz)));
+    XMMerror = XMMloss;
+    XMMz = _mm_add_ps(_mm_and_ps(_mm_cmpgt_ps(XMMz, _mm_set1_ps(0.0f)),
             _mm_set1_ps(1.0f)),
-            _mm_and_ps(_mm_cmplt_ps(*XMMz, _mm_set1_ps(0.0f)),
+            _mm_and_ps(_mm_cmplt_ps(XMMz, _mm_set1_ps(0.0f)),
             _mm_set1_ps(-1.0f)));
 }
 #elif defined USEAVX
-inline void L1_MFR::prepare()
+inline void L1_MFR::prepare(__m256 &XMMz, __m128d &XMMloss, __m128d &XMMerror, __m256 &XMMrk)
 {
-    MFSolver::prepare();
-    *XMMz = _mm256_add_ps(*XMMz, _mm256_permute2f128_ps(*XMMz, *XMMz, 0x1));
-    *XMMz = _mm256_hadd_ps(*XMMz, *XMMz);
-    *XMMz = _mm256_hadd_ps(*XMMz, *XMMz);
-    *XMMz = _mm256_sub_ps(_mm256_set1_ps(N->r), *XMMz);
-    *XMMloss = _mm_add_pd(*XMMloss, _mm_cvtps_pd(_mm256_castps256_ps128(
-               _mm256_andnot_ps(_mm256_set1_ps(-0.0f), *XMMz))));
-    *XMMerror = *XMMloss;
-    *XMMz = _mm256_add_ps(_mm256_and_ps(_mm256_cmp_ps(*XMMz,
+    calc_z(XMMz,XMMloss,XMMerror, XMMrk, model.k, p, q);
+    XMMz = _mm256_add_ps(XMMz, _mm256_permute2f128_ps(XMMz, XMMz, 0x1));
+    XMMz = _mm256_hadd_ps(XMMz, XMMz);
+    XMMz = _mm256_hadd_ps(XMMz, XMMz);
+    XMMz = _mm256_sub_ps(_mm256_set1_ps(N->r), XMMz);
+    XMMloss = _mm_add_pd(XMMloss, _mm_cvtps_pd(_mm256_castps256_ps128(
+              _mm256_andnot_ps(_mm256_set1_ps(-0.0f), XMMz))));
+    XMMerror = XMMloss;
+    XMMz = _mm256_add_ps(_mm256_and_ps(_mm256_cmp_ps(XMMz,
             _mm256_set1_ps(0.0f), _CMP_GT_OS), _mm256_set1_ps(1.0f)),
-            _mm256_and_ps(_mm256_cmp_ps(*XMMz,
+            _mm256_and_ps(_mm256_cmp_ps(XMMz,
             _mm256_set1_ps(0.0f), _CMP_LT_OS), _mm256_set1_ps(-1.0f)));
 }
 #else
 inline void L1_MFR::prepare()
 {
-    MFSolver::prepare();
+    calc_z(z, loss, error, rk, model.k, p, q);
     z = N->r-z;
     loss += abs(z);
     error = loss;
@@ -1642,45 +1767,51 @@ inline void L1_MFR::prepare()
 class KL_MFR : public MFSolver
 {
 public:
-    KL_MFR(Scheduler &scheduler, BlockBase* block, mf_float *PG, mf_float *QG,
+    KL_MFR(Scheduler &scheduler, BlockBase *block, mf_float *PG, mf_float *QG,
            mf_model &model, mf_parameter param, bool &slow_only)
-        : MFSolver(scheduler, block, PG, QG, model, param, slow_only) {}
+        : MFSolver(scheduler, block, PG, QG, model, param, slow_only){}
 
 protected:
+#if defined USESSE
+    void prepare(__m128 &XMMz, __m128d &XMMloss, __m128d &XMMerror, __m128 &XMMrk);
+#elif defined USEAVX
+    void prepare(__m256 &XMMz, __m128d &XMMloss, __m128d &XMMerror, __m256 &XMMrk);
+#else
     void prepare();
+#endif
 };
 
 #if defined USESSE
-inline void KL_MFR::prepare()
+inline void KL_MFR::prepare(__m128 &XMMz, __m128d &XMMloss, __m128d &XMMerror, __m128 &XMMrk)
 {
-    MFSolver::prepare();
-    *XMMz = _mm_hadd_ps(*XMMz, *XMMz);
-    *XMMz = _mm_hadd_ps(*XMMz, *XMMz);
-    *XMMz = _mm_div_ps(_mm_set1_ps(N->r), *XMMz);
-    _mm_store_ss(&z, *XMMz);
-    *XMMloss = _mm_add_pd(*XMMloss, _mm_cvtps_pd(
-               _mm_set1_ps(N->r*(log(z)-1+1/z))));
-    *XMMerror = *XMMloss;
-    *XMMz = _mm_sub_ps(*XMMz, _mm_set1_ps(1.0f));
+    calc_z(XMMz, XMMloss, XMMerror, XMMrk, model.k, p, q);
+    XMMz = _mm_hadd_ps(XMMz, XMMz);
+    XMMz = _mm_hadd_ps(XMMz, XMMz);
+    XMMz = _mm_div_ps(_mm_set1_ps(N->r), XMMz);
+    _mm_store_ss(&z, XMMz);
+    XMMloss = _mm_add_pd(XMMloss, _mm_cvtps_pd(
+              _mm_set1_ps(N->r*(log(z)-1+1/z))));
+    XMMerror = XMMloss;
+    XMMz = _mm_sub_ps(XMMz, _mm_set1_ps(1.0f));
 }
 #elif defined USEAVX
-inline void KL_MFR::prepare()
+inline void KL_MFR::prepare(__m256 &XMMz, __m128d &XMMloss, __m128d &XMMerror, __m256 &XMMrk)
 {
-    MFSolver::prepare();
-    *XMMz = _mm256_add_ps(*XMMz, _mm256_permute2f128_ps(*XMMz, *XMMz, 0x1));
-    *XMMz = _mm256_hadd_ps(*XMMz, *XMMz);
-    *XMMz = _mm256_hadd_ps(*XMMz, *XMMz);
-    *XMMz = _mm256_div_ps(_mm256_set1_ps(N->r), *XMMz);
-    _mm_store_ss(&z, _mm256_castps256_ps128(*XMMz));
-    *XMMloss = _mm_add_pd(*XMMloss, _mm_cvtps_pd(
-               _mm_set1_ps(N->r*(log(z)-1+1/z))));
-    *XMMerror = *XMMloss;
-    *XMMz = _mm256_sub_ps(*XMMz, _mm256_set1_ps(1.0f));
+    calc_z(XMMz, XMMloss, XMMerror, XMMrk, model.k, p, q);
+    XMMz = _mm256_add_ps(XMMz, _mm256_permute2f128_ps(XMMz, XMMz, 0x1));
+    XMMz = _mm256_hadd_ps(XMMz, XMMz);
+    XMMz = _mm256_hadd_ps(XMMz, XMMz);
+    XMMz = _mm256_div_ps(_mm256_set1_ps(N->r), XMMz);
+    _mm_store_ss(&z, _mm256_castps256_ps128(XMMz));
+    XMMloss = _mm_add_pd(XMMloss, _mm_cvtps_pd(
+              _mm_set1_ps(N->r*(log(z)-1+1/z))));
+    XMMerror = XMMloss;
+    XMMz = _mm256_sub_ps(XMMz, _mm256_set1_ps(1.0f));
 }
 #else
 inline void KL_MFR::prepare()
 {
-    MFSolver::prepare();
+    calc_z(z, loss, error, rk, model.k, p, q);
     z = N->r/z;
     loss += N->r*(log(z)-1+1/z);
     error = loss;
@@ -1691,61 +1822,67 @@ inline void KL_MFR::prepare()
 class LR_MFC : public MFSolver
 {
 public:
-    LR_MFC(Scheduler &scheduler, BlockBase* block, mf_float *PG, mf_float *QG,
+    LR_MFC(Scheduler &scheduler, BlockBase *block, mf_float *PG, mf_float *QG,
            mf_model &model, mf_parameter param, bool &slow_only)
-        : MFSolver(scheduler, block, PG, QG, model, param, slow_only) {}
+        : MFSolver(scheduler, block, PG, QG, model, param, slow_only){}
 
 protected:
+#if defined USESSE
+    void prepare(__m128 &XMMz, __m128d &XMMloss, __m128d &XMMerror, __m128 &XMMrk);
+#elif defined USEAVX
+    void prepare(__m256 &XMMz, __m128d &XMMloss, __m128d &XMMerror, __m256 &XMMrk);
+#else
     void prepare();
+#endif
 };
 
 #if defined USESSE
-inline void LR_MFC::prepare()
+inline void LR_MFC::prepare(__m128 &XMMz, __m128d &XMMloss, __m128d &XMMerror, __m128 &XMMrk)
 {
-    MFSolver::prepare();
-    *XMMz = _mm_hadd_ps(*XMMz, *XMMz);
-    *XMMz = _mm_hadd_ps(*XMMz, *XMMz);
-    _mm_store_ss(&z, *XMMz);
+    calc_z(XMMz,XMMloss,XMMerror, XMMrk, model.k, p, q);
+    XMMz = _mm_hadd_ps(XMMz, XMMz);
+    XMMz = _mm_hadd_ps(XMMz, XMMz);
+    _mm_store_ss(&z, XMMz);
     if(N->r > 0)
     {
         z = exp(-z);
-        *XMMloss = _mm_add_pd(*XMMloss, _mm_set1_pd(log(1+z)));
-        *XMMz = _mm_set1_ps(z/(1+z));
+        XMMloss = _mm_add_pd(XMMloss, _mm_set1_pd(log(1+z)));
+        XMMz = _mm_set1_ps(z/(1+z));
     }
     else
     {
         z = exp(z);
-        *XMMloss = _mm_add_pd(*XMMloss, _mm_set1_pd(log(1+z)));
-        *XMMz = _mm_set1_ps(-z/(1+z));
+        XMMloss = _mm_add_pd(XMMloss, _mm_set1_pd(log(1+z)));
+        XMMz = _mm_set1_ps(-z/(1+z));
     }
-    *XMMerror = *XMMloss;
+    XMMerror = XMMloss;
 }
 #elif defined USEAVX
-inline void LR_MFC::prepare()
+inline void LR_MFC::prepare(__m256 &XMMz, __m128d &XMMloss, __m128d &XMMerror, __m256 &XMMrk)
 {
-    MFSolver::prepare();
-    *XMMz = _mm256_add_ps(*XMMz, _mm256_permute2f128_ps(*XMMz, *XMMz, 0x1));
-    *XMMz = _mm256_hadd_ps(*XMMz, *XMMz);
-    *XMMz = _mm256_hadd_ps(*XMMz, *XMMz);
-    _mm_store_ss(&z, _mm256_castps256_ps128(*XMMz));
+    calc_z(XMMz,XMMloss,XMMerror, XMMrk, model.k, p, q);
+    XMMz = _mm256_add_ps(XMMz, _mm256_permute2f128_ps(XMMz, XMMz, 0x1));
+    XMMz = _mm256_hadd_ps(XMMz, XMMz);
+    XMMz = _mm256_hadd_ps(XMMz, XMMz);
+    _mm_store_ss(&z, _mm256_castps256_ps128(XMMz));
     if(N->r > 0)
     {
         z = exp(-z);
-        *XMMloss = _mm_add_pd(*XMMloss, _mm_set1_pd(log(1.0+z)));
-        *XMMz = _mm256_set1_ps(z/(1+z));
+        XMMloss = _mm_add_pd(XMMloss, _mm_set1_pd(log(1.0+z)));
+        XMMz = _mm256_set1_ps(z/(1+z));
     }
     else
     {
         z = exp(z);
-        *XMMloss = _mm_add_pd(*XMMloss, _mm_set1_pd(log(1.0+z)));
-        *XMMz = _mm256_set1_ps(-z/(1+z));
+        XMMloss = _mm_add_pd(XMMloss, _mm_set1_pd(log(1.0+z)));
+        XMMz = _mm256_set1_ps(-z/(1+z));
     }
-    *XMMerror = *XMMloss;
+    XMMerror = XMMloss;
 }
 #else
 inline void LR_MFC::prepare()
 {
-    MFSolver::prepare();
+    calc_z(z, loss, error, rk, model.k, p, q);
     if(N->r > 0)
     {
         z = exp(-z);
@@ -1766,73 +1903,79 @@ inline void LR_MFC::prepare()
 class L2_MFC : public MFSolver
 {
 public:
-    L2_MFC(Scheduler &scheduler, BlockBase* block,
+    L2_MFC(Scheduler &scheduler, BlockBase *block,
            mf_float *PG, mf_float *QG, mf_model &model,
            mf_parameter param, bool &slow_only)
         : MFSolver(scheduler, block, PG, QG, model, param, slow_only) {}
 
 protected:
+#if defined USESSE
+    void prepare(__m128 &XMMz, __m128d &XMMloss, __m128d &XMMerror, __m128 &XMMrk);
+#elif defined USEAVX
+    void prepare(__m256 &XMMz, __m128d &XMMloss, __m128d &XMMerror, __m256 &XMMrk);
+#else
     void prepare();
+#endif
 };
 
 #if defined USESSE
-inline void L2_MFC::prepare()
+inline void L2_MFC::prepare(__m128 &XMMz, __m128d &XMMloss, __m128d &XMMerror, __m128 &XMMrk)
 {
-    MFSolver::prepare();
-    *XMMz = _mm_hadd_ps(*XMMz, *XMMz);
-    *XMMz = _mm_hadd_ps(*XMMz, *XMMz);
+    calc_z(XMMz,XMMloss,XMMerror, XMMrk, model.k, p, q);
+    XMMz = _mm_hadd_ps(XMMz, XMMz);
+    XMMz = _mm_hadd_ps(XMMz, XMMz);
     if(N->r > 0)
     {
-        __m128 mask = _mm_cmpgt_ps(*XMMz, _mm_set1_ps(0.0f));
-        *XMMerror = _mm_add_pd(*XMMerror, _mm_cvtps_pd(
-                    _mm_and_ps(_mm_set1_ps(1.0f), mask)));
-        *XMMz = _mm_max_ps(_mm_set1_ps(0.0f), _mm_sub_ps(
-                _mm_set1_ps(1.0f), *XMMz));
+        __m128 mask = _mm_cmpgt_ps(XMMz, _mm_set1_ps(0.0f));
+        XMMerror = _mm_add_pd(XMMerror, _mm_cvtps_pd(
+                   _mm_and_ps(_mm_set1_ps(1.0f), mask)));
+        XMMz = _mm_max_ps(_mm_set1_ps(0.0f), _mm_sub_ps(
+                _mm_set1_ps(1.0f), XMMz));
     }
     else
     {
-        __m128 mask = _mm_cmplt_ps(*XMMz, _mm_set1_ps(0.0f));
-        *XMMerror = _mm_add_pd(*XMMerror, _mm_cvtps_pd(
-                    _mm_and_ps(_mm_set1_ps(1.0f), mask)));
-        *XMMz = _mm_min_ps(_mm_set1_ps(0.0f), _mm_sub_ps(
-                _mm_set1_ps(-1.0f), *XMMz));
+        __m128 mask = _mm_cmplt_ps(XMMz, _mm_set1_ps(0.0f));
+        XMMerror = _mm_add_pd(XMMerror, _mm_cvtps_pd(
+                   _mm_and_ps(_mm_set1_ps(1.0f), mask)));
+        XMMz = _mm_min_ps(_mm_set1_ps(0.0f), _mm_sub_ps(
+                _mm_set1_ps(-1.0f), XMMz));
     }
-    *XMMloss = _mm_add_pd(*XMMloss, _mm_cvtps_pd(
-               _mm_mul_ps(*XMMz, *XMMz)));
+    XMMloss = _mm_add_pd(XMMloss, _mm_cvtps_pd(
+               _mm_mul_ps(XMMz, XMMz)));
 }
 #elif defined USEAVX
-inline void L2_MFC::prepare()
+inline void L2_MFC::prepare(__m256 &XMMz, __m128d &XMMloss, __m128d &XMMerror, __m256 &XMMrk)
 {
-    MFSolver::prepare();
-    *XMMz = _mm256_add_ps(*XMMz, _mm256_permute2f128_ps(*XMMz, *XMMz, 0x1));
-    *XMMz = _mm256_hadd_ps(*XMMz, *XMMz);
-    *XMMz = _mm256_hadd_ps(*XMMz, *XMMz);
+    calc_z(XMMz,XMMloss,XMMerror, XMMrk, model.k, p, q);
+    XMMz = _mm256_add_ps(XMMz, _mm256_permute2f128_ps(XMMz, XMMz, 0x1));
+    XMMz = _mm256_hadd_ps(XMMz, XMMz);
+    XMMz = _mm256_hadd_ps(XMMz, XMMz);
     if(N->r > 0)
     {
-        __m128 mask = _mm_cmpgt_ps(_mm256_castps256_ps128(*XMMz),
+        __m128 mask = _mm_cmpgt_ps(_mm256_castps256_ps128(XMMz),
                       _mm_set1_ps(0.0f));
-        *XMMerror = _mm_add_pd(*XMMerror, _mm_cvtps_pd(
+        XMMerror = _mm_add_pd(XMMerror, _mm_cvtps_pd(
                     _mm_and_ps(_mm_set1_ps(1.0f), mask)));
-        *XMMz = _mm256_max_ps(_mm256_set1_ps(0.0f),
-                _mm256_sub_ps(_mm256_set1_ps(1.0f), *XMMz));
+        XMMz = _mm256_max_ps(_mm256_set1_ps(0.0f),
+                _mm256_sub_ps(_mm256_set1_ps(1.0f), XMMz));
     }
     else
     {
-        __m128 mask = _mm_cmplt_ps(_mm256_castps256_ps128(*XMMz),
+        __m128 mask = _mm_cmplt_ps(_mm256_castps256_ps128(XMMz),
                       _mm_set1_ps(0.0f));
-        *XMMerror = _mm_add_pd(*XMMerror, _mm_cvtps_pd(
-                    _mm_and_ps(_mm_set1_ps(1.0f), mask)));
-        *XMMz = _mm256_min_ps(_mm256_set1_ps(0.0f),
-                _mm256_sub_ps(_mm256_set1_ps(-1.0f), *XMMz));
+        XMMerror = _mm_add_pd(XMMerror, _mm_cvtps_pd(
+                   _mm_and_ps(_mm_set1_ps(1.0f), mask)));
+        XMMz = _mm256_min_ps(_mm256_set1_ps(0.0f),
+                _mm256_sub_ps(_mm256_set1_ps(-1.0f), XMMz));
     }
-    *XMMloss = _mm_add_pd(*XMMloss, _mm_cvtps_pd(
-               _mm_mul_ps(_mm256_castps256_ps128(*XMMz),
-               _mm256_castps256_ps128(*XMMz))));
+    XMMloss = _mm_add_pd(XMMloss, _mm_cvtps_pd(
+               _mm_mul_ps(_mm256_castps256_ps128(XMMz),
+               _mm256_castps256_ps128(XMMz))));
 }
 #else
 inline void L2_MFC::prepare()
 {
-    MFSolver::prepare();
+    calc_z(z, loss, error, rk, model.k, p, q);
     if(N->r > 0)
     {
         error += z > 0? 1: 0;
@@ -1850,77 +1993,83 @@ inline void L2_MFC::prepare()
 class L1_MFC : public MFSolver
 {
 public:
-    L1_MFC(Scheduler &scheduler, BlockBase* block, mf_float *PG, mf_float *QG,
+    L1_MFC(Scheduler &scheduler, BlockBase *block, mf_float *PG, mf_float *QG,
            mf_model &model, mf_parameter param, bool &slow_only)
-        : MFSolver(scheduler, block, PG, QG, model, param, slow_only) {}
+        : MFSolver(scheduler, block, PG, QG, model, param, slow_only){}
 
 protected:
+#if defined USESSE
+    void prepare(__m128 &XMMz, __m128d &XMMloss, __m128d &XMMerror, __m128 &XMMrk);
+#elif defined USEAVX
+    void prepare(__m256 &XMMz, __m128d &XMMloss, __m128d &XMMerror, __m256 &XMMrk);
+#else
     void prepare();
+#endif
 };
 
 #if defined USESSE
-inline void L1_MFC::prepare()
+inline void L1_MFC::prepare(__m128 &XMMz, __m128d &XMMloss, __m128d &XMMerror, __m128 &XMMrk)
 {
-    MFSolver::prepare();
-    *XMMz = _mm_hadd_ps(*XMMz, *XMMz);
-    *XMMz = _mm_hadd_ps(*XMMz, *XMMz);
+    calc_z(XMMz,XMMloss,XMMerror, XMMrk, model.k, p, q);
+    XMMz = _mm_hadd_ps(XMMz, XMMz);
+    XMMz = _mm_hadd_ps(XMMz, XMMz);
     if(N->r > 0)
     {
-        *XMMerror = _mm_add_pd(*XMMerror, _mm_cvtps_pd(
-                    _mm_and_ps(_mm_cmpge_ps(*XMMz, _mm_set1_ps(0.0f)),
-                    _mm_set1_ps(1.0f))));
-        *XMMz = _mm_sub_ps(_mm_set1_ps(1.0f), *XMMz);
-        *XMMloss = _mm_add_pd(*XMMloss, _mm_cvtps_pd(
-                   _mm_max_ps(_mm_set1_ps(0.0f), *XMMz)));
-        *XMMz = _mm_and_ps(_mm_cmpge_ps(*XMMz, _mm_set1_ps(0.0f)),
+        XMMerror = _mm_add_pd(XMMerror, _mm_cvtps_pd(
+                   _mm_and_ps(_mm_cmpge_ps(XMMz, _mm_set1_ps(0.0f)),
+                   _mm_set1_ps(1.0f))));
+        XMMz = _mm_sub_ps(_mm_set1_ps(1.0f), XMMz);
+        XMMloss = _mm_add_pd(XMMloss, _mm_cvtps_pd(
+                  _mm_max_ps(_mm_set1_ps(0.0f), XMMz)));
+        XMMz = _mm_and_ps(_mm_cmpge_ps(XMMz, _mm_set1_ps(0.0f)),
                 _mm_set1_ps(1.0f));
     }
     else
     {
-        *XMMerror = _mm_add_pd(*XMMerror, _mm_cvtps_pd(
-                    _mm_and_ps(_mm_cmplt_ps(*XMMz, _mm_set1_ps(0.0f)),
-                    _mm_set1_ps(1.0f))));
-        *XMMz = _mm_add_ps(_mm_set1_ps(1.0f), *XMMz);
-        *XMMloss = _mm_add_pd(*XMMloss, _mm_cvtps_pd(
-                   _mm_max_ps(_mm_set1_ps(0.0f), *XMMz)));
-        *XMMz = _mm_and_ps(_mm_cmpge_ps(*XMMz, _mm_set1_ps(0.0f)),
+        XMMerror = _mm_add_pd(XMMerror, _mm_cvtps_pd(
+                   _mm_and_ps(_mm_cmplt_ps(XMMz, _mm_set1_ps(0.0f)),
+                   _mm_set1_ps(1.0f))));
+        XMMz = _mm_add_ps(_mm_set1_ps(1.0f), XMMz);
+        XMMloss = _mm_add_pd(XMMloss, _mm_cvtps_pd(
+                  _mm_max_ps(_mm_set1_ps(0.0f), XMMz)));
+        XMMz = _mm_and_ps(_mm_cmpge_ps(XMMz, _mm_set1_ps(0.0f)),
                 _mm_set1_ps(-1.0f));
     }
 }
 #elif defined USEAVX
-inline void L1_MFC::prepare()
+inline void L1_MFC::prepare(__m256 &XMMz, __m128d &XMMloss, __m128d &XMMerror, __m256 &XMMrk)
 {
-    MFSolver::prepare();
-    *XMMz = _mm256_add_ps(*XMMz, _mm256_permute2f128_ps(*XMMz, *XMMz, 0x1));
-    *XMMz = _mm256_hadd_ps(*XMMz, *XMMz);
-    *XMMz = _mm256_hadd_ps(*XMMz, *XMMz);
+    calc_z(XMMz,XMMloss,XMMerror, XMMrk, model.k, p, q);
+    XMMz = _mm256_add_ps(XMMz, _mm256_permute2f128_ps(XMMz, XMMz, 0x1));
+    XMMz = _mm256_hadd_ps(XMMz, XMMz);
+    XMMz = _mm256_hadd_ps(XMMz, XMMz);
     if(N->r > 0)
     {
-        *XMMerror = _mm_add_pd(*XMMerror, _mm_cvtps_pd(_mm_and_ps(
-                    _mm_cmpge_ps(_mm256_castps256_ps128(*XMMz),
-                    _mm_set1_ps(0.0f)), _mm_set1_ps(1.0f))));
-        *XMMz = _mm256_sub_ps(_mm256_set1_ps(1.0f), *XMMz);
-        *XMMloss = _mm_add_pd(*XMMloss, _mm_cvtps_pd(_mm_max_ps(
-                   _mm_set1_ps(0.0f), _mm256_castps256_ps128(*XMMz))));
-        *XMMz = _mm256_and_ps(_mm256_cmp_ps(*XMMz, _mm256_set1_ps(0.0f),
+        XMMerror = _mm_add_pd(XMMerror, _mm_cvtps_pd(_mm_and_ps(
+                   _mm_cmpge_ps(_mm256_castps256_ps128(XMMz),
+                   _mm_set1_ps(0.0f)), _mm_set1_ps(1.0f))));
+        XMMz = _mm256_sub_ps(_mm256_set1_ps(1.0f), XMMz);
+        XMMloss = _mm_add_pd(XMMloss, _mm_cvtps_pd(_mm_max_ps(
+                  _mm_set1_ps(0.0f), _mm256_castps256_ps128(XMMz))));
+        XMMz = _mm256_and_ps(_mm256_cmp_ps(XMMz, _mm256_set1_ps(0.0f),
                 _CMP_GE_OS), _mm256_set1_ps(1.0f));
     }
     else
     {
-        *XMMerror = _mm_add_pd(*XMMerror, _mm_cvtps_pd(_mm_and_ps(
-                    _mm_cmplt_ps(_mm256_castps256_ps128(*XMMz),
-                    _mm_set1_ps(0.0f)), _mm_set1_ps(1.0f))));
-        *XMMz = _mm256_add_ps(_mm256_set1_ps(1.0f), *XMMz);
-        *XMMloss = _mm_add_pd(*XMMloss, _mm_cvtps_pd(_mm_max_ps(
-                   _mm_set1_ps(0.0f), _mm256_castps256_ps128(*XMMz))));
-        *XMMz = _mm256_and_ps(_mm256_cmp_ps(*XMMz, _mm256_set1_ps(0.0f),
+        XMMerror = _mm_add_pd(XMMerror, _mm_cvtps_pd(_mm_and_ps(
+                   _mm_cmplt_ps(_mm256_castps256_ps128(XMMz),
+                   _mm_set1_ps(0.0f)), _mm_set1_ps(1.0f))));
+        XMMz = _mm256_add_ps(_mm256_set1_ps(1.0f), XMMz);
+        XMMloss = _mm_add_pd(XMMloss, _mm_cvtps_pd(_mm_max_ps(
+                  _mm_set1_ps(0.0f), _mm256_castps256_ps128(XMMz))));
+        XMMz = _mm256_and_ps(_mm256_cmp_ps(XMMz, _mm256_set1_ps(0.0f),
                 _CMP_GE_OS), _mm256_set1_ps(-1.0f));
     }
 }
 #else
 inline void L1_MFC::prepare()
 {
-    MFSolver::prepare();
+    calc_z(z, loss, error, rk, model.k, p, q);
     if(N->r > 0)
     {
         loss += max(0.0f, 1-z);
@@ -1935,7 +2084,6 @@ inline void L1_MFC::prepare()
     }
 }
 #endif
-
 //--------------------------------------
 //------------One-class MF--------------
 //--------------------------------------
@@ -1943,53 +2091,79 @@ inline void L1_MFC::prepare()
 class BPRSolver : public SolverBase
 {
 public:
-    BPRSolver(Scheduler &scheduler, BlockBase* block,
+    BPRSolver(Scheduler &scheduler, BlockBase *block,
         mf_float *PG, mf_float *QG, mf_model &model, mf_parameter param,
         bool &slow_only, bool is_column_oriented):
         SolverBase(scheduler, block, PG, QG, model, param, slow_only),
         is_column_oriented(is_column_oriented){}
 
 protected:
+#if defined USESSE
+    void initialize(__m128d &XMMloss, __m128d &XMMerror);
+    void prepare(__m128 &XMMz, __m128d &XMMloss, __m128d &XMMerror, __m128 &XMMrk);
+    void sg_update(mf_int d_begin, mf_int d_end, __m128 XMMz,
+        __m128 XMMlambda_p1, __m128 XMMlambda_q1, __m128 XMMlambda_p2, __m128 XMMlamdba_q2,
+            __m128 XMMeta, __m128 XMMrk);
+    void update(__m128 &XMMrk);
+    void finalize(__m128d XMMloss, __m128d XMMerror);
+#elif defined USEAVX
+    void initialize(__m128d &XMMloss, __m128d &XMMerror);
+    void prepare(__m256 &XMMz, __m128d &XMMloss, __m128d &XMMerror, __m256 &XMMrk);
+    void sg_update(mf_int d_begin, mf_int d_end, __m256 XMMz,
+            __m256 XMMlambda_p1, __m256 XMMlambda_q1, __m256 XMMlambda_p2, __m256 XMMlamdba_q2,
+            __m256 XMMeta, __m256 XMMrk);
+    void update(__m256 &XMMrk);
+    void finalize(__m128d XMMloss, __m128d XMMerror);
+#else
     void initialize();
     void prepare();
-    void update();
     void sg_update(mf_int d_begin, mf_int d_end);
+    void update();
     void finalize();
-
+#endif
     bool is_column_oriented;
     mf_int bpr_bid;
     mf_float *w;
     mf_float *wG;
 };
 
-inline void BPRSolver::initialize()
+
+#if defined USESSE
+inline void BPRSolver::initialize(__m128d &XMMloss, __m128d &XMMerror)
 {
-    SolverBase::initialize();
+    XMMloss = _mm_setzero_pd();
+    XMMerror = _mm_setzero_pd();
+    bid = scheduler.get_job();
+    block->reload(bid);
     bpr_bid = scheduler.get_bpr_job(bid, is_column_oriented);
 }
 
-inline void BPRSolver::finalize()
+inline void BPRSolver::finalize(__m128d XMMloss, __m128d XMMerror)
 {
-    SolverBase::finalize();
+    _mm_store_sd(&loss, XMMloss);
+    _mm_store_sd(&error, XMMerror);
+    scheduler.put_job(bid, loss, error);
     scheduler.put_bpr_job(bid, bpr_bid);
 }
 
-inline void BPRSolver::update()
+inline void BPRSolver::update(__m128 &XMMrk)
 {
-    SolverBase::update();
+    XMMrk = _mm_set1_ps((mf_float)1.0/(model.k-kALIGN));
+    pG++;
+    qG++;
     wG++;
 }
 
-#if defined USESSE
-inline void BPRSolver::sg_update(mf_int d_begin, mf_int d_end)
+inline void BPRSolver::sg_update(mf_int d_begin, mf_int d_end, __m128 XMMz,
+            __m128 XMMlambda_p1, __m128 XMMlambda_q1, __m128 XMMlambda_p2,
+            __m128 XMMlambda_q2, __m128 XMMeta, __m128 XMMrk)
 {
     __m128 XMMpG = _mm_load1_ps(pG);
     __m128 XMMqG = _mm_load1_ps(qG);
     __m128 XMMwG = _mm_load1_ps(wG);
-
-    __m128 XMMeta_p = _mm_mul_ps(*XMMeta, _mm_rsqrt_ps(XMMpG));
-    __m128 XMMeta_q = _mm_mul_ps(*XMMeta, _mm_rsqrt_ps(XMMqG));
-    __m128 XMMeta_w = _mm_mul_ps(*XMMeta, _mm_rsqrt_ps(XMMwG));
+    __m128 XMMeta_p = _mm_mul_ps(XMMeta, _mm_rsqrt_ps(XMMpG));
+    __m128 XMMeta_q = _mm_mul_ps(XMMeta, _mm_rsqrt_ps(XMMqG));
+    __m128 XMMeta_w = _mm_mul_ps(XMMeta, _mm_rsqrt_ps(XMMwG));
 
     __m128 XMMpG1 = _mm_setzero_ps();
     __m128 XMMqG1 = _mm_setzero_ps();
@@ -2000,12 +2174,12 @@ inline void BPRSolver::sg_update(mf_int d_begin, mf_int d_end)
         __m128 XMMp = _mm_load_ps(p+d);
         __m128 XMMq = _mm_load_ps(q+d);
         __m128 XMMw = _mm_load_ps(w+d);
-        __m128 XMMpg = _mm_add_ps(_mm_mul_ps(*XMMlambda_p2, XMMp),
-                       _mm_mul_ps(*XMMz, _mm_sub_ps(XMMw, XMMq)));
-        __m128 XMMqg = _mm_sub_ps(_mm_mul_ps(*XMMlambda_q2, XMMq),
-                       _mm_mul_ps(*XMMz, XMMp));
-        __m128 XMMwg = _mm_add_ps(_mm_mul_ps(*XMMlambda_q2, XMMw),
-                       _mm_mul_ps(*XMMz, XMMp));
+        __m128 XMMpg = _mm_add_ps(_mm_mul_ps(XMMlambda_p2, XMMp),
+                       _mm_mul_ps(XMMz, _mm_sub_ps(XMMw, XMMq)));
+        __m128 XMMqg = _mm_sub_ps(_mm_mul_ps(XMMlambda_q2, XMMq),
+                       _mm_mul_ps(XMMz, XMMp));
+        __m128 XMMwg = _mm_add_ps(_mm_mul_ps(XMMlambda_q2, XMMw),
+                       _mm_mul_ps(XMMz, XMMp));
 
         XMMpG1 = _mm_add_ps(XMMpG1, _mm_mul_ps(XMMpg, XMMpg));
         XMMqG1 = _mm_add_ps(XMMqG1, _mm_mul_ps(XMMqg, XMMqg));
@@ -2016,31 +2190,31 @@ inline void BPRSolver::sg_update(mf_int d_begin, mf_int d_end)
         XMMw = _mm_sub_ps(XMMw, _mm_mul_ps(XMMeta_w, XMMwg));
 
         mf_float tmp = 0;
-        _mm_store_ss(&tmp, *XMMlambda_p1);
+        _mm_store_ss(&tmp, XMMlambda_p1);
         if(tmp > 0)
         {
             __m128 XMMflip = _mm_and_ps(_mm_cmple_ps(XMMp, _mm_set1_ps(0.0f)),
                              _mm_set1_ps(-0.0f));
             XMMp = _mm_xor_ps(XMMflip,
                    _mm_max_ps(_mm_sub_ps(_mm_xor_ps(XMMp, XMMflip),
-                   _mm_mul_ps(XMMeta_p, *XMMlambda_p1)), _mm_set1_ps(0.0f)));
+                   _mm_mul_ps(XMMeta_p, XMMlambda_p1)), _mm_set1_ps(0.0f)));
         }
 
-        _mm_store_ss(&tmp, *XMMlambda_q1);
+        _mm_store_ss(&tmp, XMMlambda_q1);
         if (tmp > 0)
         {
             __m128 XMMflip = _mm_and_ps(_mm_cmple_ps(XMMq, _mm_set1_ps(0.0f)),
                              _mm_set1_ps(-0.0f));
             XMMp = _mm_xor_ps(XMMflip,
                    _mm_max_ps(_mm_sub_ps(_mm_xor_ps(XMMq, XMMflip),
-                   _mm_mul_ps(XMMeta_q, *XMMlambda_q1)), _mm_set1_ps(0.0f)));
+                   _mm_mul_ps(XMMeta_q, XMMlambda_q1)), _mm_set1_ps(0.0f)));
 
 
             XMMflip = _mm_and_ps(_mm_cmple_ps(XMMw, _mm_set1_ps(0.0f)),
                     _mm_set1_ps(-0.0f));
             XMMw = _mm_xor_ps(XMMflip,
                    _mm_max_ps(_mm_sub_ps(_mm_xor_ps(XMMw, XMMflip),
-                   _mm_mul_ps(XMMeta_w, *XMMlambda_q1)), _mm_set1_ps(0.0f)));
+                   _mm_mul_ps(XMMeta_w, XMMlambda_q1)), _mm_set1_ps(0.0f)));
 
         }
 
@@ -2062,43 +2236,75 @@ inline void BPRSolver::sg_update(mf_int d_begin, mf_int d_end)
     XMMwG1 = _mm_hadd_ps(XMMwG1, XMMwG1);
     XMMwG1 = _mm_hadd_ps(XMMwG1, XMMwG1);
 
-    XMMpG = _mm_add_ps(XMMpG, _mm_mul_ps(XMMpG1, *XMMrk));
-    XMMqG = _mm_add_ps(XMMqG, _mm_mul_ps(XMMqG1, *XMMrk));
-    XMMwG = _mm_add_ps(XMMwG, _mm_mul_ps(XMMwG1, *XMMrk));
+    XMMpG = _mm_add_ps(XMMpG, _mm_mul_ps(XMMpG1, XMMrk));
+    XMMqG = _mm_add_ps(XMMqG, _mm_mul_ps(XMMqG1, XMMrk));
+    XMMwG = _mm_add_ps(XMMwG, _mm_mul_ps(XMMwG1, XMMrk));
 
     _mm_store_ss(pG, XMMpG);
     _mm_store_ss(qG, XMMqG);
     _mm_store_ss(wG, XMMwG);
 }
 
-inline void BPRSolver::prepare()
+inline void BPRSolver::prepare(__m128 &XMMz, __m128d &XMMloss, __m128d &XMMerror, __m128 &XMMrk)
 {
-    SolverBase::prepare();
+    mf_int negative = scheduler.get_negative(bid, bpr_bid, model.m, model.n,
+                                             is_column_oriented);
+    w = Q + negative*model.k;
+    wG = QG + negative*2;
+    calc_z(XMMz, XMMloss, XMMerror, XMMrk, model.k, p, q);
     for (mf_int d = 0; d < model.k; d+= 4)
-        *XMMz = _mm_sub_ps(*XMMz, _mm_mul_ps(
-               _mm_load_ps(p+d), _mm_load_ps(w+d)));
+        XMMz = _mm_sub_ps(XMMz, _mm_mul_ps(
+               _mm_load_ps(w+d), _mm_load_ps(q+d)));
 
-    *XMMz = _mm_hadd_ps(*XMMz, *XMMz);
-    *XMMz = _mm_hadd_ps(*XMMz, *XMMz);
+    XMMz = _mm_hadd_ps(XMMz, XMMz);
+    XMMz = _mm_hadd_ps(XMMz, XMMz);
 
-    _mm_store_ss(&z, *XMMz);
+    _mm_store_ss(&z, XMMz);
     z = exp(-z);
-    *XMMloss = _mm_add_pd(*XMMloss, _mm_set1_pd(log(1+z)));
-    *XMMerror = *XMMloss;
-    *XMMz = _mm_set1_ps(z/(1+z));
+    XMMloss = _mm_add_pd(XMMloss, _mm_set1_pd(log(1+z)));
+    XMMerror = XMMloss;
+    XMMz = _mm_set1_ps(z/(1+z));
 }
+
 #elif defined USEAVX
-inline void BPRSolver::sg_update(mf_int d_begin, mf_int d_end)
+inline void BPRSolver::initialize(__m128d &XMMloss, __m128d &XMMerror)
+{
+    XMMloss = _mm_setzero_pd();
+    XMMerror = _mm_setzero_pd();
+    bid = scheduler.get_job();
+    block->reload(bid);
+    bpr_bid = scheduler.get_bpr_job(bid, is_column_oriented);
+}
+
+inline void BPRSolver::finalize(__m128d XMMloss, __m128d XMMerror)
+{
+    _mm_store_sd(&loss, XMMloss);
+    _mm_store_sd(&error, XMMerror);
+    scheduler.put_job(bid, loss, error);
+    scheduler.put_bpr_job(bid, bpr_bid);
+}
+
+inline void BPRSolver::update(__m256 &XMMrk)
+{
+    XMMrk = _mm256_set1_ps((mf_float)1.0/(model.k-kALIGN));
+    pG++;
+    qG++;
+    wG++;
+}
+
+inline void BPRSolver::sg_update(mf_int d_begin, mf_int d_end, __m256 XMMz,
+            __m256 XMMlambda_p1, __m256 XMMlambda_q1, __m256 XMMlambda_p2,
+            __m256 XMMlambda_q2, __m256 XMMeta, __m256 XMMrk)
 {
     __m256 XMMpG = _mm256_broadcast_ss(pG);
     __m256 XMMqG = _mm256_broadcast_ss(qG);
     __m256 XMMwG = _mm256_broadcast_ss(wG);
     __m256 XMMeta_p =
-        _mm256_mul_ps(*XMMeta, _mm256_rsqrt_ps(XMMpG));
+        _mm256_mul_ps(XMMeta, _mm256_rsqrt_ps(XMMpG));
     __m256 XMMeta_q =
-        _mm256_mul_ps(*XMMeta, _mm256_rsqrt_ps(XMMqG));
+        _mm256_mul_ps(XMMeta, _mm256_rsqrt_ps(XMMqG));
     __m256 XMMeta_w =
-        _mm256_mul_ps(*XMMeta, _mm256_rsqrt_ps(XMMwG));
+        _mm256_mul_ps(XMMeta, _mm256_rsqrt_ps(XMMwG));
 
     __m256 XMMpG1 = _mm256_setzero_ps();
     __m256 XMMqG1 = _mm256_setzero_ps();
@@ -2109,12 +2315,12 @@ inline void BPRSolver::sg_update(mf_int d_begin, mf_int d_end)
         __m256 XMMp = _mm256_load_ps(p+d);
         __m256 XMMq = _mm256_load_ps(q+d);
         __m256 XMMw = _mm256_load_ps(w+d);
-        __m256 XMMpg = _mm256_add_ps(_mm256_mul_ps(*XMMlambda_p2, XMMp),
-                       _mm256_mul_ps(*XMMz, _mm256_sub_ps(XMMw, XMMq)));
-        __m256 XMMqg = _mm256_sub_ps(_mm256_mul_ps(*XMMlambda_q2, XMMq),
-                       _mm256_mul_ps(*XMMz, XMMp));
-        __m256 XMMwg = _mm256_add_ps(_mm256_mul_ps(*XMMlambda_q2, XMMw),
-                       _mm256_mul_ps(*XMMz, XMMp));
+        __m256 XMMpg = _mm256_add_ps(_mm256_mul_ps(XMMlambda_p2, XMMp),
+                       _mm256_mul_ps(XMMz, _mm256_sub_ps(XMMw, XMMq)));
+        __m256 XMMqg = _mm256_sub_ps(_mm256_mul_ps(XMMlambda_q2, XMMq),
+                       _mm256_mul_ps(XMMz, XMMp));
+        __m256 XMMwg = _mm256_add_ps(_mm256_mul_ps(XMMlambda_q2, XMMw),
+                       _mm256_mul_ps(XMMz, XMMp));
 
         XMMpG1 = _mm256_add_ps(XMMpG1, _mm256_mul_ps(XMMpg, XMMpg));
         XMMqG1 = _mm256_add_ps(XMMqG1, _mm256_mul_ps(XMMqg, XMMqg));
@@ -2125,7 +2331,7 @@ inline void BPRSolver::sg_update(mf_int d_begin, mf_int d_end)
         XMMw = _mm256_sub_ps(XMMw, _mm256_mul_ps(XMMeta_w, XMMwg));
 
         mf_float tmp = 0;
-        _mm_store_ss(&tmp, _mm256_castps256_ps128(*XMMlambda_p1));
+        _mm_store_ss(&tmp, _mm256_castps256_ps128(XMMlambda_p1));
         if(tmp > 0)
         {
             __m256 XMMflip =
@@ -2134,11 +2340,11 @@ inline void BPRSolver::sg_update(mf_int d_begin, mf_int d_end)
                 _mm256_set1_ps(-0.0f));
             XMMp = _mm256_xor_ps(XMMflip,
                    _mm256_max_ps(_mm256_sub_ps(_mm256_xor_ps(XMMp, XMMflip),
-                   _mm256_mul_ps(XMMeta_p, *XMMlambda_p1)),
+                   _mm256_mul_ps(XMMeta_p, XMMlambda_p1)),
                    _mm256_set1_ps(0.0f)));
         }
 
-        _mm_store_ss(&tmp, _mm256_castps256_ps128(*XMMlambda_q1));
+        _mm_store_ss(&tmp, _mm256_castps256_ps128(XMMlambda_q1));
         if (tmp > 0)
         {
             __m256 XMMflip;
@@ -2148,7 +2354,7 @@ inline void BPRSolver::sg_update(mf_int d_begin, mf_int d_end)
                       _mm256_set1_ps(-0.0f));
             XMMp = _mm256_xor_ps(XMMflip,
                    _mm256_max_ps(_mm256_sub_ps(_mm256_xor_ps(XMMq, XMMflip),
-                   _mm256_mul_ps(XMMeta_q, *XMMlambda_q1)),
+                   _mm256_mul_ps(XMMeta_q, XMMlambda_q1)),
                    _mm256_set1_ps(0.0f)));
 
 
@@ -2157,7 +2363,7 @@ inline void BPRSolver::sg_update(mf_int d_begin, mf_int d_end)
                       _mm256_set1_ps(-0.0f));
             XMMw = _mm256_xor_ps(XMMflip,
                    _mm256_max_ps(_mm256_sub_ps(_mm256_xor_ps(XMMw, XMMflip),
-                   _mm256_mul_ps(XMMeta_w, *XMMlambda_q1)),
+                   _mm256_mul_ps(XMMeta_w, XMMlambda_q1)),
                    _mm256_set1_ps(0.0f)));
         }
 
@@ -2186,33 +2392,59 @@ inline void BPRSolver::sg_update(mf_int d_begin, mf_int d_end)
     XMMwG1 = _mm256_hadd_ps(XMMwG1, XMMwG1);
     XMMwG1 = _mm256_hadd_ps(XMMwG1, XMMwG1);
 
-    XMMpG = _mm256_add_ps(XMMpG, _mm256_mul_ps(XMMpG1, *XMMrk));
-    XMMqG = _mm256_add_ps(XMMqG, _mm256_mul_ps(XMMqG1, *XMMrk));
-    XMMwG = _mm256_add_ps(XMMwG, _mm256_mul_ps(XMMwG1, *XMMrk));
+    XMMpG = _mm256_add_ps(XMMpG, _mm256_mul_ps(XMMpG1, XMMrk));
+    XMMqG = _mm256_add_ps(XMMqG, _mm256_mul_ps(XMMqG1, XMMrk));
+    XMMwG = _mm256_add_ps(XMMwG, _mm256_mul_ps(XMMwG1, XMMrk));
 
     _mm_store_ss(pG, _mm256_castps256_ps128(XMMpG));
     _mm_store_ss(qG, _mm256_castps256_ps128(XMMqG));
     _mm_store_ss(wG, _mm256_castps256_ps128(XMMwG));
 }
 
-inline void BPRSolver::prepare()
+inline void BPRSolver::prepare(__m256 &XMMz, __m128d &XMMloss, __m128d &XMMerror, __m256 &XMMrk)
 {
-    SolverBase::prepare();
+    mf_int negative = scheduler.get_negative(bid, bpr_bid, model.m, model.n,
+                                             is_column_oriented);
+    w = Q + negative*model.k;
+    wG = QG + negative*2;
+    calc_z(XMMz, XMMloss, XMMerror, XMMrk, model.k, p, q);
     for (mf_int d = 0; d < model.k; d+= 8)
-        *XMMz = _mm256_sub_ps(*XMMz, _mm256_mul_ps(
-                _mm256_load_ps(p+d), _mm256_load_ps(w+d)));
+        XMMz = _mm256_sub_ps(XMMz, _mm256_mul_ps(
+                _mm256_load_ps(w+d), _mm256_load_ps(q+d)));
 
-    *XMMz = _mm256_add_ps(*XMMz, _mm256_permute2f128_ps(*XMMz, *XMMz, 0x1));
-    *XMMz = _mm256_hadd_ps(*XMMz, *XMMz);
-    *XMMz = _mm256_hadd_ps(*XMMz, *XMMz);
+    XMMz = _mm256_add_ps(XMMz, _mm256_permute2f128_ps(XMMz, XMMz, 0x1));
+    XMMz = _mm256_hadd_ps(XMMz, XMMz);
+    XMMz = _mm256_hadd_ps(XMMz, XMMz);
 
-    _mm_store_ss(&z, _mm256_castps256_ps128(*XMMz));
+    _mm_store_ss(&z, _mm256_castps256_ps128(XMMz));
     z = exp(-z);
-    *XMMloss = _mm_add_pd(*XMMloss, _mm_set1_pd(log(1+z)));
-    *XMMerror = *XMMloss;
-    *XMMz = _mm256_set1_ps(z/(1+z));
+    XMMloss = _mm_add_pd(XMMloss, _mm_set1_pd(log(1+z)));
+    XMMerror = XMMloss;
+    XMMz = _mm256_set1_ps(z/(1+z));
 }
 #else
+inline void BPRSolver::initialize()
+{
+    loss = 0.0;
+    error = 0.0;
+    bid = scheduler.get_job();
+    block->reload(bid);
+    bpr_bid = scheduler.get_bpr_job(bid, is_column_oriented);
+}
+
+inline void BPRSolver::finalize()
+{
+    scheduler.put_job(bid, loss, error);
+    scheduler.put_bpr_job(bid, bpr_bid);
+}
+
+inline void BPRSolver::update()
+{
+    rk = (mf_float)1.0/(model.k-kALIGN);
+    pG++;
+    qG++;
+    wG++;
+}
 inline void BPRSolver::sg_update(mf_int d_begin, mf_int d_end)
 {
     mf_float eta_p = param.eta*qrsqrt(*pG);
@@ -2266,7 +2498,11 @@ inline void BPRSolver::sg_update(mf_int d_begin, mf_int d_end)
 
 inline void BPRSolver::prepare()
 {
-    SolverBase::prepare();
+    mf_int negative = scheduler.get_negative(bid, bpr_bid, model.m, model.n,
+                                             is_column_oriented);
+    w = Q + negative*model.k;
+    wG = QG + negative*2;
+    calc_z(z, loss, error, rk, model.k, p, q);
     for (mf_int d = 0; d < model.k; d++)
         z -= w[d]*p[d];
 
@@ -2280,76 +2516,71 @@ inline void BPRSolver::prepare()
 class COL_BPR_MFOC : public BPRSolver
 {
 public:
-    COL_BPR_MFOC(Scheduler &scheduler, BlockBase* block,
+    COL_BPR_MFOC(Scheduler &scheduler, BlockBase *block,
                  mf_float *PG, mf_float *QG, mf_model &model,
                  mf_parameter param, bool &slow_only,
                  bool is_column_oriented=true)
         : BPRSolver(scheduler, block, PG, QG, model, param, slow_only,
                     is_column_oriented) {}
 protected:
-    void prepare();
-    void initialize();
+#if defined USESSE
+    void init_params(__m128 &XMMlambda_p1, __m128 &XMMlambda_q1,
+        __m128 &XMMlambda_p2, __m128 &XMMlabmda_q2, __m128 &XMMeta);
+#elif defined USEAVX
+    void init_params(__m256 &XMMlambda_p1, __m256 &XMMlambda_q1,
+        __m256 &XMMlambda_p2, __m256 &XMMlabmda_q2, __m256 &XMMeta);
+#else
+    void init_params();
+#endif
 };
 
 #if defined USESSE
-inline void COL_BPR_MFOC::initialize()
+inline void COL_BPR_MFOC::init_params(__m128 &XMMlambda_p1, __m128 &XMMlambda_q1,
+        __m128 &XMMlambda_p2, __m128 &XMMlambda_q2, __m128 &XMMeta)
 {
-    BPRSolver::initialize();
-    *XMMlambda_p1 = _mm_set1_ps(param.lambda_q1);
-    *XMMlambda_q1 = _mm_set1_ps(param.lambda_p1);
-    *XMMlambda_p2 = _mm_set1_ps(param.lambda_q2);
-    *XMMlambda_q2 = _mm_set1_ps(param.lambda_p2);
+    XMMlambda_p1 = _mm_set1_ps(param.lambda_p1);
+    XMMlambda_q1 = _mm_set1_ps(param.lambda_q1);
+    XMMlambda_p2 = _mm_set1_ps(param.lambda_p2);
+    XMMlambda_q2 = _mm_set1_ps(param.lambda_q2);
+    XMMeta = _mm_set1_ps(param.eta);
+    P = model.Q;
+    Q = model.P;
 }
 #elif defined USEAVX
-inline void COL_BPR_MFOC::initialize()
+inline void COL_BPR_MFOC::init_params(__m256 &XMMlambda_p1, __m256 &XMMlambda_q1,
+        __m256 &XMMlambda_p2, __m256 &XMMlambda_q2, __m256 &XMMeta)
 {
-    BPRSolver::initialize();
-    *XMMlambda_p1 = _mm256_set1_ps(param.lambda_q1);
-    *XMMlambda_q1 = _mm256_set1_ps(param.lambda_p1);
-    *XMMlambda_p2 = _mm256_set1_ps(param.lambda_q2);
-    *XMMlambda_q2 = _mm256_set1_ps(param.lambda_p2);
+    XMMlambda_p1 = _mm256_set1_ps(param.lambda_p1);
+    XMMlambda_q1 = _mm256_set1_ps(param.lambda_q1);
+    XMMlambda_p2 = _mm256_set1_ps(param.lambda_p2);
+    XMMlambda_q2 = _mm256_set1_ps(param.lambda_q2);
+    XMMeta = _mm256_set1_ps(param.eta);
+    P = model.Q;
+    Q = model.P;
 }
 #else
-inline void COL_BPR_MFOC::initialize()
+inline void COL_BPR_MFOC::init_params()
 {
-    BPRSolver::initialize();
-    swap(lambda_p1, lambda_q1);
-    swap(lambda_p2, lambda_q2);
+    lambda_p1 = param.lambda_q1;
+    lambda_q1 = param.lambda_p1;
+    lambda_p2 = param.lambda_q2;
+    lambda_q2 = param.lambda_p2;
+    P = model.Q;
+    Q = model.P;
 }
 #endif
-
-inline void COL_BPR_MFOC::prepare()
-{
-    mf_int negative = scheduler.get_negative(bid, bpr_bid, model.m, model.n,
-                                             is_column_oriented);
-    swap(p, q);
-    swap(pG, qG);
-    w = model.P + negative*model.k;
-    wG = PG + negative*2;
-    BPRSolver::prepare();
-}
 
 class ROW_BPR_MFOC : public BPRSolver
 {
 public:
-    ROW_BPR_MFOC(Scheduler &scheduler, BlockBase* block,
+    ROW_BPR_MFOC(Scheduler &scheduler, BlockBase *block,
                  mf_float *PG, mf_float *QG, mf_model &model,
                  mf_parameter param, bool &slow_only,
                  bool is_column_oriented=false)
         : BPRSolver(scheduler, block, PG, QG, model, param,
                     slow_only, is_column_oriented) {}
-protected:
-    void prepare();
 };
 
-inline void ROW_BPR_MFOC::prepare()
-{
-    mf_int negative = scheduler.get_negative(bid, bpr_bid, model.m, model.n,
-                                             is_column_oriented);
-    w = model.Q + negative*model.k;
-    wG = QG + negative*2;
-    BPRSolver::prepare();
-}
 
 class SolverFactory
 {
