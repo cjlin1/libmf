@@ -2,6 +2,11 @@
 train=../mf-train
 predict=../mf-predict
 
+if [ ! -s $train ] || [ ! -s $predict ]
+then
+    (cd .. && make)
+fi
+
 ##########################################################################
 # Real-valued matrix factorization
 ##########################################################################

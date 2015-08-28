@@ -63,7 +63,7 @@ Model Format
     process, the two factor matrices `P' and `Q' are stored into a model file.
     The file starts with a header including the following parameters:
 
-        `loss': loss of the solved MF problem
+        `f': the loss function of the solved MF problem
         `m': the number of rows in the training matrix,
         `n': the number of columns in the training matrix,
         `k': the number of latent factors,
@@ -87,11 +87,11 @@ Model Format
                         n 2
                         k 3
                         b 0.5
-                        p1 T 1 3 5
-                        p2 F 0 0 0
-                        p3 T 2 4 6
-                        q1 T -1 -3 -5
-                        q2 T -2 -4 -6
+                        p0 T 1 3 5
+                        p1 F 0 0 0
+                        p2 T 2 4 6
+                        q0 T -1 -3 -5
+                        q1 T -2 -4 -6
                         --------------------------
 
 
@@ -104,11 +104,11 @@ Command Line Usage
     usage: mf-train [options] training_set_file [model_file]
 
     options:
-    -o  <loss>: specify loss function (default 0)
+    -f  <loss>: specify loss function (default 0)
       for real-valued matrix factorization
          0 -- square error
          1 -- absolute error
-         2 -- generalized KL-divergence (NMF only)
+         2 -- generalized KL-divergence (--nmf is required)
       for binary matrix factorization
          5 -- logarithmic error
          6 -- squared hinge loss
@@ -116,12 +116,11 @@ Command Line Usage
       for one-class matrix factorization
         10 -- row-oriented pair-wise logarithmic loss
         11 -- column-oriented pair-wise logarithmic loss
-    -l1 <lambda>,<lambda>: set L1-regularization parameters for P and Q
-        (default 0). If only one lambda is specified, P and Q share the same
-        lambda.
-    -l2 <lambda>,<lambda>: set L2-regularization parameters for P and Q
-        (default 0.1). If only one lambda is specified, P and Q share the
-        same lambda.
+    -l1 <lambda>,<lambda>: set L1-regularization parameters for P and Q. If
+        only one value is specified, P and Q share the same lambda. (default 0)
+    -l2 <lambda>,<lambda>: set L2-regularization parameters for P and Q. If
+        only one value is specified, P and Q share the same lambda. (default
+        0.1)
     -k <dimensions>: set number of dimensions (default 8)
     -t <iter>: set number of iterations (default 20)
     -r <eta>: set initial learning rate (default 0.1)
@@ -203,7 +202,7 @@ train a model with the following regularization coefficients:
     coefficient of L2-norm regularization on P = 0.01
     coefficient of L2-norm regularization on Q = 0.03
 
-> mf-train -x 5 -l1 0,0.02 -k 100 -t 30 -r 0.02 -s 4 bigdata_bin.tr.txt model
+> mf-train -f 5 -l1 0,0.02 -k 100 -t 30 -r 0.02 -s 4 bigdata_bin.tr.txt model
 
 train a logistic matrix factorization model with the following parameters:
 
@@ -222,7 +221,7 @@ use bigdata.te.txt for hold-out validation
 
 do five fold cross validation
 
-> mf-train -x 2 --nmf bigdata.tr.txt
+> mf-train -f 2 --nmf bigdata.tr.txt
 
 do non-negative matrix factorization with generalized KL-divergence
 
@@ -290,7 +289,7 @@ There are four public data structures in LIBMF.
 
 -   struct mf_parameter
     {
-        mf_int loss;
+        mf_int f;
         mf_int k;
         mf_int nr_threads;
         mf_int nr_bins;
@@ -310,7 +309,7 @@ There are four public data structures in LIBMF.
 
     variable      meaning                                    default
     ================================================================
-    loss          loss function                                    0
+    f             loss function                                    0
     k             number of latent factors                         8
     nr_threads    number of threads used                          12
     nr_bins       number of bins                                  20
@@ -352,7 +351,7 @@ There are four public data structures in LIBMF.
 
 -   struct mf_model
     {
-        mf_int loss;
+        mf_int f;
         mf_int m;
         mf_int n;
         mf_int k;
@@ -361,7 +360,7 @@ There are four public data structures in LIBMF.
         mf_float *Q;
     };
 
-    `mf_model' is used to store models in LIBMF. `loss' indicates the loss
+    `mf_model' is used to store models learned by LIBMF. `f' indicates the loss
     funcion of the sovled MF problem. `m' represents the number of rows, `n'
     represents the number of columns, `k' represents the number of latent
     factors, and `b' is the average value of all elements in the training
@@ -440,10 +439,10 @@ Functions available in LIBMF include:
         mf_int q_idx);
 
     Predict the value at the position (p_idx, q_idx). The predicted value is a
-    real number if the loss used is for real-valued MF or one-class MF. For
-    binary MF losses, the predicted value is also binary. If `p_idx' or
-    `q_idx' can not be found in the training data, the function returns the
-    average (mode if binary MF) of all values in the training matrix.
+    real number for real-valued MF or one-class MF. For binary MF, the range of
+    the prediction values are {-1, 1}. If `p_idx' or `q_idx' can not be found
+    in the training data, the function returns the average (mode if binary MF)
+    of all values in the training matrix.
 
 -   mf_double calc_rmse(mf_problem *prob, mf_model *model);
 
