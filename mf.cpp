@@ -1147,8 +1147,6 @@ protected:
     BlockBase *block;
     mf_float *PG;
     mf_float *QG;
-    mf_float *Q;
-    mf_float *P;
     mf_model &model;
     mf_parameter param;
     bool &slow_only;
@@ -1196,8 +1194,8 @@ inline void SolverBase::run()
         while(block->move_next())
         {
             N = block->get_current();
-            p = P+(mf_long)N->u*model.k;
-            q = Q+(mf_long)N->v*model.k;
+            p = model.P+(mf_long)N->u*model.k;
+            q = model.Q+(mf_long)N->v*model.k;
             pG = PG+N->u*2;
             qG = QG+N->v*2;
             prepare(XMMz,XMMloss,XMMerror, XMMrk);
@@ -1231,8 +1229,8 @@ inline void SolverBase::run()
         while(block->move_next())
         {
             N = block->get_current();
-            p = P+(mf_long)N->u*model.k;
-            q = Q+(mf_long)N->v*model.k;
+            p = model.P+(mf_long)N->u*model.k;
+            q = model.Q+(mf_long)N->v*model.k;
             pG = PG+N->u*2;
             qG = QG+N->v*2;
             prepare(XMMz,XMMloss,XMMerror, XMMrk);
@@ -1257,8 +1255,8 @@ inline void SolverBase::run()
         while(block->move_next())
         {
             N = block->get_current();
-            p = P+(mf_long)N->u*model.k;
-            q = Q+(mf_long)N->v*model.k;
+            p = model.P+(mf_long)N->u*model.k;
+            q = model.Q+(mf_long)N->v*model.k;
             pG = PG+N->u*2;
             qG = QG+N->v*2;
             prepare();
@@ -1306,8 +1304,6 @@ inline void SolverBase::init_params(__m128 &XMMlambda_p1, __m128 &XMMlambda_q1,
     XMMlambda_p2 = _mm_set1_ps(param.lambda_p2);
     XMMlambda_q2 = _mm_set1_ps(param.lambda_q2);
     XMMeta = _mm_set1_ps(param.eta);
-    P = model.P;
-    Q = model.Q;
 }
 inline void SolverBase::initialize(__m128d &XMMloss, __m128d &XMMerror)
 {
@@ -1333,8 +1329,6 @@ inline void SolverBase::init_params(__m256 &XMMlambda_p1, __m256 &XMMlambda_q1,
     XMMlambda_p2 = _mm256_set1_ps(param.lambda_p2);
     XMMlambda_q2 = _mm256_set1_ps(param.lambda_q2);
     XMMeta = _mm256_set1_ps(param.eta);
-    P = model.P;
-    Q = model.Q;
 }
 
 inline void SolverBase::initialize(__m128d &XMMloss, __m128d &XMMerror)
@@ -1370,14 +1364,11 @@ inline void SolverBase::init_params()
     lambda_q1 = param.lambda_q1;
     lambda_p2 = param.lambda_p2;
     lambda_q2 = param.lambda_q2;
-    P = model.P;
-    Q = model.Q;
 }
 inline void SolverBase::initialize()
 {
     loss = 0.0;
     error = 0.0;
-    bid = scheduler.get_job();
     bid = scheduler.get_job();
     block->reload(bid);
 }
@@ -1441,7 +1432,6 @@ inline void MFSolver::sg_update(mf_int d_begin, mf_int d_end, __m128 XMMz,
 
         XMMp = _mm_sub_ps(XMMp, _mm_mul_ps(XMMeta_p, XMMpg));
         XMMq = _mm_sub_ps(XMMq, _mm_mul_ps(XMMeta_q, XMMqg));
-
         _mm_store_ps(p+d, XMMp);
         _mm_store_ps(q+d, XMMq);
     }
@@ -1530,7 +1520,6 @@ inline void MFSolver::sg_update(mf_int d_begin, mf_int d_end, __m256 XMMz,
         XMMq = _mm256_sub_ps(XMMq, _mm256_mul_ps(XMMeta_q, XMMqg));
         _mm256_store_ps(p+d, XMMp);
         _mm256_store_ps(q+d, XMMq);
-
     }
     mf_float tmp = 0;
     _mm_store_ss(&tmp, _mm256_castps256_ps128(XMMlambda_p1));
@@ -2121,6 +2110,7 @@ protected:
     void update();
     void finalize();
 #endif
+    virtual void prepare_negative()=0;
     bool is_column_oriented;
     mf_int bpr_bid;
     mf_float *w;
@@ -2174,6 +2164,7 @@ inline void BPRSolver::sg_update(mf_int d_begin, mf_int d_end, __m128 XMMz,
         __m128 XMMp = _mm_load_ps(p+d);
         __m128 XMMq = _mm_load_ps(q+d);
         __m128 XMMw = _mm_load_ps(w+d);
+
         __m128 XMMpg = _mm_add_ps(_mm_mul_ps(XMMlambda_p2, XMMp),
                        _mm_mul_ps(XMMz, _mm_sub_ps(XMMw, XMMq)));
         __m128 XMMqg = _mm_sub_ps(_mm_mul_ps(XMMlambda_q2, XMMq),
@@ -2189,23 +2180,37 @@ inline void BPRSolver::sg_update(mf_int d_begin, mf_int d_end, __m128 XMMz,
         XMMq = _mm_sub_ps(XMMq, _mm_mul_ps(XMMeta_q, XMMqg));
         XMMw = _mm_sub_ps(XMMw, _mm_mul_ps(XMMeta_w, XMMwg));
 
-        mf_float tmp = 0;
-        _mm_store_ss(&tmp, XMMlambda_p1);
-        if(tmp > 0)
+        _mm_store_ps(p+d, XMMp);
+        _mm_store_ps(q+d, XMMq);
+        _mm_store_ps(w+d, XMMw);
+    }
+
+    mf_float tmp = 0;
+    _mm_store_ss(&tmp, XMMlambda_p1);
+    if(tmp > 0)
+    {
+        for(mf_int d = d_begin; d < d_end; d += 4)
         {
+            __m128 XMMp = _mm_load_ps(p+d);
             __m128 XMMflip = _mm_and_ps(_mm_cmple_ps(XMMp, _mm_set1_ps(0.0f)),
                              _mm_set1_ps(-0.0f));
             XMMp = _mm_xor_ps(XMMflip,
                    _mm_max_ps(_mm_sub_ps(_mm_xor_ps(XMMp, XMMflip),
                    _mm_mul_ps(XMMeta_p, XMMlambda_p1)), _mm_set1_ps(0.0f)));
+            _mm_store_ps(p+d, XMMp);
         }
+    }
 
-        _mm_store_ss(&tmp, XMMlambda_q1);
-        if (tmp > 0)
+    _mm_store_ss(&tmp, XMMlambda_q1);
+    if (tmp > 0)
+    {
+        for(mf_int d = d_begin; d < d_end; d += 4)
         {
+            __m128 XMMq = _mm_load_ps(q+d);
+            __m128 XMMw = _mm_load_ps(w+d);
             __m128 XMMflip = _mm_and_ps(_mm_cmple_ps(XMMq, _mm_set1_ps(0.0f)),
                              _mm_set1_ps(-0.0f));
-            XMMp = _mm_xor_ps(XMMflip,
+            XMMq = _mm_xor_ps(XMMflip,
                    _mm_max_ps(_mm_sub_ps(_mm_xor_ps(XMMq, XMMflip),
                    _mm_mul_ps(XMMeta_q, XMMlambda_q1)), _mm_set1_ps(0.0f)));
 
@@ -2215,20 +2220,27 @@ inline void BPRSolver::sg_update(mf_int d_begin, mf_int d_end, __m128 XMMz,
             XMMw = _mm_xor_ps(XMMflip,
                    _mm_max_ps(_mm_sub_ps(_mm_xor_ps(XMMw, XMMflip),
                    _mm_mul_ps(XMMeta_w, XMMlambda_q1)), _mm_set1_ps(0.0f)));
-
+            _mm_store_ps(q+d, XMMq);
+            _mm_store_ps(w+d, XMMw);
         }
+    }
 
-        if(param.do_nmf)
+    if(param.do_nmf)
+    {
+        for(mf_int d = d_begin; d < d_end; d += 4)
         {
+            __m128 XMMp = _mm_load_ps(p+d);
+            __m128 XMMq = _mm_load_ps(q+d);
+            __m128 XMMw = _mm_load_ps(w+d);
             XMMp = _mm_max_ps(XMMp, _mm_set1_ps(0.0f));
             XMMq = _mm_max_ps(XMMq, _mm_set1_ps(0.0f));
             XMMw = _mm_max_ps(XMMw, _mm_set1_ps(0.0f));
+            _mm_store_ps(p+d, XMMp);
+            _mm_store_ps(q+d, XMMq);
+            _mm_store_ps(w+d, XMMw);
         }
-
-        _mm_store_ps(p+d, XMMp);
-        _mm_store_ps(q+d, XMMq);
-        _mm_store_ps(w+d, XMMw);
     }
+
     XMMpG1 = _mm_hadd_ps(XMMpG1, XMMpG1);
     XMMpG1 = _mm_hadd_ps(XMMpG1, XMMpG1);
     XMMqG1 = _mm_hadd_ps(XMMqG1, XMMqG1);
@@ -2247,10 +2259,7 @@ inline void BPRSolver::sg_update(mf_int d_begin, mf_int d_end, __m128 XMMz,
 
 inline void BPRSolver::prepare(__m128 &XMMz, __m128d &XMMloss, __m128d &XMMerror, __m128 &XMMrk)
 {
-    mf_int negative = scheduler.get_negative(bid, bpr_bid, model.m, model.n,
-                                             is_column_oriented);
-    w = Q + negative*model.k;
-    wG = QG + negative*2;
+    prepare_negative();
     calc_z(XMMz, XMMloss, XMMerror, XMMrk, model.k, p, q);
     for (mf_int d = 0; d < model.k; d+= 4)
         XMMz = _mm_sub_ps(XMMz, _mm_mul_ps(
@@ -2329,11 +2338,18 @@ inline void BPRSolver::sg_update(mf_int d_begin, mf_int d_end, __m256 XMMz,
         XMMp = _mm256_sub_ps(XMMp, _mm256_mul_ps(XMMeta_p, XMMpg));
         XMMq = _mm256_sub_ps(XMMq, _mm256_mul_ps(XMMeta_q, XMMqg));
         XMMw = _mm256_sub_ps(XMMw, _mm256_mul_ps(XMMeta_w, XMMwg));
+        _mm256_store_ps(p+d, XMMp);
+        _mm256_store_ps(q+d, XMMq);
+        _mm256_store_ps(w+d, XMMw);
+    }
 
-        mf_float tmp = 0;
-        _mm_store_ss(&tmp, _mm256_castps256_ps128(XMMlambda_p1));
-        if(tmp > 0)
+    mf_float tmp = 0;
+    _mm_store_ss(&tmp, _mm256_castps256_ps128(XMMlambda_p1));
+    if(tmp > 0)
+    {
+        for(mf_int d = d_begin; d < d_end; d += 8)
         {
+            __m256 XMMp = _mm256_load_ps(p+d);
             __m256 XMMflip =
                 _mm256_and_ps(
                 _mm256_cmp_ps(XMMp, _mm256_set1_ps(0.0f), _CMP_LE_OS),
@@ -2342,17 +2358,23 @@ inline void BPRSolver::sg_update(mf_int d_begin, mf_int d_end, __m256 XMMz,
                    _mm256_max_ps(_mm256_sub_ps(_mm256_xor_ps(XMMp, XMMflip),
                    _mm256_mul_ps(XMMeta_p, XMMlambda_p1)),
                    _mm256_set1_ps(0.0f)));
+            _mm256_store_ps(p+d, XMMp);
         }
+    }
 
-        _mm_store_ss(&tmp, _mm256_castps256_ps128(XMMlambda_q1));
-        if (tmp > 0)
+    _mm_store_ss(&tmp, _mm256_castps256_ps128(XMMlambda_q1));
+    if (tmp > 0)
+    {
+        for(mf_int d = d_begin; d < d_end; d += 8)
         {
+            __m256 XMMq = _mm256_load_ps(q+d);
+            __m256 XMMw = _mm256_load_ps(w+d);
             __m256 XMMflip;
 
             XMMflip = _mm256_and_ps(
                       _mm256_cmp_ps(XMMq, _mm256_set1_ps(0.0f), _CMP_LE_OS),
                       _mm256_set1_ps(-0.0f));
-            XMMp = _mm256_xor_ps(XMMflip,
+            XMMq = _mm256_xor_ps(XMMflip,
                    _mm256_max_ps(_mm256_sub_ps(_mm256_xor_ps(XMMq, XMMflip),
                    _mm256_mul_ps(XMMeta_q, XMMlambda_q1)),
                    _mm256_set1_ps(0.0f)));
@@ -2365,18 +2387,27 @@ inline void BPRSolver::sg_update(mf_int d_begin, mf_int d_end, __m256 XMMz,
                    _mm256_max_ps(_mm256_sub_ps(_mm256_xor_ps(XMMw, XMMflip),
                    _mm256_mul_ps(XMMeta_w, XMMlambda_q1)),
                    _mm256_set1_ps(0.0f)));
+            _mm256_store_ps(q+d, XMMq);
+            _mm256_store_ps(w+d, XMMw);
         }
+    }
 
-        if(param.do_nmf)
+    if(param.do_nmf)
+    {
+        for(mf_int d = d_begin; d < d_end; d += 8)
         {
+            __m256 XMMp = _mm256_load_ps(p+d);
+            __m256 XMMq = _mm256_load_ps(q+d);
+            __m256 XMMw = _mm256_load_ps(w+d);
             XMMp = _mm256_max_ps(XMMp, _mm256_set1_ps(0.0f));
             XMMq = _mm256_max_ps(XMMq, _mm256_set1_ps(0.0f));
             XMMw = _mm256_max_ps(XMMw, _mm256_set1_ps(0.0f));
+            _mm256_store_ps(p+d, XMMp);
+            _mm256_store_ps(q+d, XMMq);
+            _mm256_store_ps(w+d, XMMw);
         }
-        _mm256_store_ps(p+d, XMMp);
-        _mm256_store_ps(q+d, XMMq);
-        _mm256_store_ps(w+d, XMMw);
     }
+
     XMMpG1 = _mm256_add_ps(XMMpG1,
              _mm256_permute2f128_ps(XMMpG1, XMMpG1, 0x1));
     XMMpG1 = _mm256_hadd_ps(XMMpG1, XMMpG1);
@@ -2403,10 +2434,7 @@ inline void BPRSolver::sg_update(mf_int d_begin, mf_int d_end, __m256 XMMz,
 
 inline void BPRSolver::prepare(__m256 &XMMz, __m128d &XMMloss, __m128d &XMMerror, __m256 &XMMrk)
 {
-    mf_int negative = scheduler.get_negative(bid, bpr_bid, model.m, model.n,
-                                             is_column_oriented);
-    w = Q + negative*model.k;
-    wG = QG + negative*2;
+    prepare_negative();
     calc_z(XMMz, XMMloss, XMMerror, XMMrk, model.k, p, q);
     for (mf_int d = 0; d < model.k; d+= 8)
         XMMz = _mm256_sub_ps(XMMz, _mm256_mul_ps(
@@ -2468,28 +2496,37 @@ inline void BPRSolver::sg_update(mf_int d_begin, mf_int d_end)
         p[d] -= eta_p*gp;
         q[d] -= eta_q*gq;
         w[d] -= eta_w*gw;
+    }
 
         if(lambda_p1 > 0)
         {
-            mf_float p1 = max(abs(p[d])-lambda_p1*eta_p, 0.0f);
-            p[d] = p[d] >= 0? p1: -p1;
+            for(mf_int d = d_begin; d < d_end; d++)
+            {
+                mf_float p1 = max(abs(p[d])-lambda_p1*eta_p, 0.0f);
+                p[d] = p[d] >= 0? p1: -p1;
+            }
         }
 
         if (lambda_q1 > 0)
         {
-            mf_float q1 = max(abs(w[d])-lambda_q1*eta_w, 0.0f);
-            w[d] = w[d] >= 0? q1: -q1;
-            q1 = max(abs(q[d])-lambda_q1*eta_q, 0.0f);
-            q[d] = q[d] >= 0? q1: -q1;
+            for(mf_int d = d_begin; d < d_end; d++)
+            {
+                mf_float q1 = max(abs(w[d])-lambda_q1*eta_w, 0.0f);
+                w[d] = w[d] >= 0? q1: -q1;
+                q1 = max(abs(q[d])-lambda_q1*eta_q, 0.0f);
+                q[d] = q[d] >= 0? q1: -q1;
+            }
         }
 
         if(param.do_nmf)
         {
-            p[d] = max(p[d], (mf_float)0.0);
-            q[d] = max(q[d], (mf_float)0.0);
-            w[d] = max(w[d], (mf_float)0.0);
+            for(mf_int d = d_begin; d < d_end; d++)
+            {
+                p[d] = max(p[d], (mf_float)0.0);
+                q[d] = max(q[d], (mf_float)0.0);
+                w[d] = max(w[d], (mf_float)0.0);
+            }
         }
-    }
 
     *pG += pG1*rk;
     *qG += qG1*rk;
@@ -2498,10 +2535,7 @@ inline void BPRSolver::sg_update(mf_int d_begin, mf_int d_end)
 
 inline void BPRSolver::prepare()
 {
-    mf_int negative = scheduler.get_negative(bid, bpr_bid, model.m, model.n,
-                                             is_column_oriented);
-    w = Q + negative*model.k;
-    wG = QG + negative*2;
+    prepare_negative();
     calc_z(z, loss, error, rk, model.k, p, q);
     for (mf_int d = 0; d < model.k; d++)
         z -= w[d]*p[d];
@@ -2532,31 +2566,38 @@ protected:
 #else
     void init_params();
 #endif
+    void prepare_negative();
 };
+
+inline void COL_BPR_MFOC::prepare_negative()
+{
+    mf_int negative = scheduler.get_negative(bid, bpr_bid, model.m, model.n,
+                                             is_column_oriented);
+    w = model.P + negative*model.k;
+    wG = PG + negative*2;
+    swap(p, q);
+    swap(pG, qG);
+}
 
 #if defined USESSE
 inline void COL_BPR_MFOC::init_params(__m128 &XMMlambda_p1, __m128 &XMMlambda_q1,
         __m128 &XMMlambda_p2, __m128 &XMMlambda_q2, __m128 &XMMeta)
 {
-    XMMlambda_p1 = _mm_set1_ps(param.lambda_p1);
-    XMMlambda_q1 = _mm_set1_ps(param.lambda_q1);
-    XMMlambda_p2 = _mm_set1_ps(param.lambda_p2);
-    XMMlambda_q2 = _mm_set1_ps(param.lambda_q2);
+    XMMlambda_p1 = _mm_set1_ps(param.lambda_q1);
+    XMMlambda_q1 = _mm_set1_ps(param.lambda_p1);
+    XMMlambda_p2 = _mm_set1_ps(param.lambda_q2);
+    XMMlambda_q2 = _mm_set1_ps(param.lambda_p2);
     XMMeta = _mm_set1_ps(param.eta);
-    P = model.Q;
-    Q = model.P;
 }
 #elif defined USEAVX
 inline void COL_BPR_MFOC::init_params(__m256 &XMMlambda_p1, __m256 &XMMlambda_q1,
         __m256 &XMMlambda_p2, __m256 &XMMlambda_q2, __m256 &XMMeta)
 {
-    XMMlambda_p1 = _mm256_set1_ps(param.lambda_p1);
-    XMMlambda_q1 = _mm256_set1_ps(param.lambda_q1);
-    XMMlambda_p2 = _mm256_set1_ps(param.lambda_p2);
-    XMMlambda_q2 = _mm256_set1_ps(param.lambda_q2);
+    XMMlambda_p1 = _mm256_set1_ps(param.lambda_q1);
+    XMMlambda_q1 = _mm256_set1_ps(param.lambda_p1);
+    XMMlambda_p2 = _mm256_set1_ps(param.lambda_q2);
+    XMMlambda_q2 = _mm256_set1_ps(param.lambda_p2);
     XMMeta = _mm256_set1_ps(param.eta);
-    P = model.Q;
-    Q = model.P;
 }
 #else
 inline void COL_BPR_MFOC::init_params()
@@ -2565,8 +2606,6 @@ inline void COL_BPR_MFOC::init_params()
     lambda_q1 = param.lambda_p1;
     lambda_p2 = param.lambda_q2;
     lambda_q2 = param.lambda_p2;
-    P = model.Q;
-    Q = model.P;
 }
 #endif
 
@@ -2579,7 +2618,17 @@ public:
                  bool is_column_oriented=false)
         : BPRSolver(scheduler, block, PG, QG, model, param,
                     slow_only, is_column_oriented) {}
+protected:
+    void prepare_negative();
 };
+
+inline void ROW_BPR_MFOC::prepare_negative()
+{
+    mf_int negative = scheduler.get_negative(bid, bpr_bid, model.m, model.n,
+                                             is_column_oriented);
+    w = model.Q + negative*model.k;
+    wG = QG + negative*2;
+}
 
 
 class SolverFactory
