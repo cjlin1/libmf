@@ -31,21 +31,21 @@ string train_help()
 "\n"
 "options:\n"
 "-l1 <lambda>,<lambda>: set L1-regularization parameters for P and Q (default 0)\n"
-"  P and Q share the same lambda if only one lambda is spceified\n"
+"  P and Q share the same lambda if only one lambda is specified\n"
 "-l2 <lambda>,<lambda>: set L2-regularization parameters of P and Q (default 0.1)\n"
-"  P and Q share the same lambda if only one lambda is spceified\n"
-"-x <solver>: specify the type of solver (default 0)\n"
-"  for numerical matrix factorization\n"
-"\t 0 -- L2-loss\n"
-"\t 1 -- L1-loss\n"
-"\t 2 -- Generalized KL-divergence\n"
+"  P and Q share the same lambda if only one lambda is specified\n"
+"-f <loss>: set loss function (default 0)\n"
+"  for real-valued matrix factorization\n"
+"\t 0 -- square error (L2-norm)\n"
+"\t 1 -- absolute error (L1-norm)\n"
+"\t 2 -- generalized KL-divergence\n"
 "  for binary matrix factorization\n"
-"\t 5 -- logistic loss\n"
-"\t 6 -- square hinge loss\n"
+"\t 5 -- logarithmic loss\n"
+"\t 6 -- squared hinge loss\n"
 "\t 7 -- hinge loss\n"
 "  for one-class matrix factorization\n"
-"\t10 -- row-oriented bayesian personalized ranking\n"
-"\t11 -- column-oriented bayesian personalized ranking\n"
+"\t10 -- row-oriented pairwise logarithmic loss\n"
+"\t11 -- column-oriented pairwise logarithmic loss\n"
 "-k <dimensions>: set number of dimensions (default 8)\n"
 "-t <iter>: set number of iterations (default 20)\n"
 "-r <eta>: set learning rate (default 0.1)\n"
@@ -193,16 +193,16 @@ Option parse_option(int argc, char **argv)
                                         must be greater than one");
             option.do_cv = true;
         }
-        else if(args[i].compare("-x") == 0)
+        else if(args[i].compare("-f") == 0)
         {
             if(i == argc-1)
-                throw invalid_argument("need to specify the type of solver\
-                                        after -x");
+                throw invalid_argument("need to specify the type of loss\
+                                        after -f");
             i++;
 
             if(!is_numerical(argv[i]))
-                throw invalid_argument("-x should be followed by a number");
-            option.param.solver = atoi(argv[i]);
+                throw invalid_argument("-f should be followed by a number");
+            option.param.loss = atoi(argv[i]);
         }
         else if(args[i].compare("-n") == 0)
         {

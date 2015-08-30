@@ -395,7 +395,7 @@ struct sort_node_by_q
 class Utility
 {
 public:
-    Utility(mf_int s, mf_int n) : solver(s), nr_threads(n) {};
+    Utility(mf_int f, mf_int n) : loss(f), nr_threads(n) {};
     void collect_info(mf_problem &prob, mf_float &avg, mf_float &std_dev);
     void collect_info_on_disk(string data_path, mf_problem &prob,
                               mf_float &avg, mf_float &std_dev);
@@ -425,7 +425,7 @@ public:
     static mf_problem* copy_problem(mf_problem const *prob, bool copy_data);
     static vector<mf_int> gen_random_map(mf_int size);
     static mf_float* malloc_aligned_float(mf_long size);
-    static mf_model* init_model(mf_int solver, mf_int m, mf_int n,
+    static mf_model* init_model(mf_int loss, mf_int m, mf_int n,
                                 mf_int k, mf_float avg,
                                 vector<mf_int> &omega_p,
                                 vector<mf_int> &omega_q);
@@ -437,7 +437,7 @@ public:
                               vector<mf_int> &q_map);
 
 private:
-    mf_int solver;
+    mf_int loss;
     mf_int nr_threads;
 };
 
@@ -618,8 +618,8 @@ mf_double Utility::calc_error(mf_node const *R, mf_long const size,
                               mf_model const &model)
 {
     mf_double error = 0;
-    if(solver == P_L2_MFR || solver == P_L1_MFR || solver == P_KL_MFR ||
-       solver == P_LR_MFC || solver == P_L2_MFC || solver == P_L1_MFC)
+    if(loss == P_L2_MFR || loss == P_L1_MFR || loss == P_KL_MFR ||
+       loss == P_LR_MFC || loss == P_L2_MFC || loss == P_L1_MFC)
     {
 #if defined USEOMP
 #pragma omp parallel for num_threads(nr_threads) schedule(static) reduction(+:error)
@@ -628,7 +628,7 @@ mf_double Utility::calc_error(mf_node const *R, mf_long const size,
         {
             mf_node const &N = R[i];
             mf_float z = mf_predict(&model, N.u, N.v);
-            switch(solver)
+            switch(loss)
             {
                 case P_L2_MFR:
                     error += pow(N.r-z, 2);
@@ -661,7 +661,7 @@ mf_double Utility::calc_error(mf_node const *R, mf_long const size,
     else
     {
         minstd_rand0 generator(rand());
-        switch(solver)
+        switch(loss)
         {
             case P_ROW_BPR_MFOC:
             {
@@ -700,7 +700,7 @@ mf_double Utility::calc_error(mf_node const *R, mf_long const size,
 
 string Utility::get_error_legend()
 {
-    switch(solver)
+    switch(loss)
     {
         case P_L2_MFR:
             return string("rmse");
@@ -905,7 +905,7 @@ mf_float* Utility::malloc_aligned_float(mf_long size)
     return (mf_float*)ptr;
 }
 
-mf_model* Utility::init_model(mf_int solver,
+mf_model* Utility::init_model(mf_int loss,
                               mf_int m, mf_int n,
                               mf_int k, mf_float avg,
                               vector<mf_int> &omega_p,
@@ -916,7 +916,7 @@ mf_model* Utility::init_model(mf_int solver,
 
     mf_model *model = new mf_model;
 
-    model->solver = solver;
+    model->loss = loss;
     model->m = m;
     model->n = n;
     model->k = k_aligned;
@@ -950,7 +950,7 @@ mf_model* Utility::init_model(mf_int solver,
                 for(mf_long d = 0; d < k_real; d++, ptr++)
                     *ptr = (mf_float)(distribution(generator)*scale);
             else
-                if(solver != P_ROW_BPR_MFOC && solver != P_COL_BPR_MFOC) // unseen for bpr is 0
+                if(loss != P_ROW_BPR_MFOC && loss != P_COL_BPR_MFOC) // unseen for bpr is 0
                     for(mf_long d = 0; d < k_real; d++, ptr++)
                         *ptr = numeric_limits<mf_float>::quiet_NaN();
         }
@@ -1809,7 +1809,7 @@ inline void KL_MFR::prepare()
 class LR_MFC : public MFSolver
 {
 public:
-    LR_MFC(Scheduler &scheduler, vector<BlockBase*> blocks, mf_float *PG, mf_float *QG,
+    LR_MFC(Scheduler &scheduler, vector<BlockBase*> &blocks, mf_float *PG, mf_float *QG,
            mf_model &model, mf_parameter param, bool &slow_only)
         : MFSolver(scheduler, blocks, PG, QG, model, param, slow_only) {}
 
@@ -1890,7 +1890,7 @@ inline void LR_MFC::prepare()
 class L2_MFC : public MFSolver
 {
 public:
-    L2_MFC(Scheduler &scheduler, vector<BlockBase*> blocks,
+    L2_MFC(Scheduler &scheduler, vector<BlockBase*> &blocks,
            mf_float *PG, mf_float *QG, mf_model &model,
            mf_parameter param, bool &slow_only)
         : MFSolver(scheduler, blocks, PG, QG, model, param, slow_only) {}
@@ -1980,7 +1980,7 @@ inline void L2_MFC::prepare()
 class L1_MFC : public MFSolver
 {
 public:
-    L1_MFC(Scheduler &scheduler, vector<BlockBase*> blocks, mf_float *PG, mf_float *QG,
+    L1_MFC(Scheduler &scheduler, vector<BlockBase*> &blocks, mf_float *PG, mf_float *QG,
            mf_model &model, mf_parameter param, bool &slow_only)
         : MFSolver(scheduler, blocks, PG, QG, model, param, slow_only) {}
 
@@ -2078,7 +2078,7 @@ inline void L1_MFC::prepare()
 class BPRSolver : public SolverBase
 {
 public:
-    BPRSolver(Scheduler &scheduler, vector<BlockBase*> blocks,
+    BPRSolver(Scheduler &scheduler, vector<BlockBase*> &blocks,
               mf_float *PG, mf_float *QG, mf_model &model, mf_parameter param,
               bool &slow_only, bool is_column_oriented)
         : SolverBase(scheduler, blocks, PG, QG, model, param, slow_only),
@@ -2652,7 +2652,7 @@ shared_ptr<SolverBase> SolverFactory::get_solver(
 {
     shared_ptr<SolverBase> solver;
 
-    switch(param.solver)
+    switch(param.loss)
     {
         case P_L2_MFR:
             solver = shared_ptr<SolverBase>(new L2_MFR(scheduler, blocks,
@@ -2686,6 +2686,8 @@ shared_ptr<SolverBase> SolverFactory::get_solver(
             solver = shared_ptr<SolverBase>(new COL_BPR_MFOC(scheduler,
                         blocks, PG, QG, model, param, slow_only));
             break;
+        default:
+            throw invalid_argument("unknown error function");
     }
     return solver;
 }
@@ -2702,11 +2704,11 @@ void fpsg_core(
     vector<mf_int> &omega_q,
     shared_ptr<mf_model> &model)
 {
-    if(param.solver == P_L2_MFR ||
-       param.solver == P_L1_MFR ||
-       param.solver == P_KL_MFR)
+    if(param.loss == P_L2_MFR ||
+       param.loss == P_L1_MFR ||
+       param.loss == P_KL_MFR)
     {
-        switch(param.solver)
+        switch(param.loss)
         {
             case P_L2_MFR:
                 param.lambda_p2 /= scale;
@@ -2768,7 +2770,7 @@ void fpsg_core(
             mf_double tr_loss = sched.get_loss();
             mf_double tr_error = sched.get_error()/tr->nnz;
 
-            switch(param.solver)
+            switch(param.loss)
             {
                 case P_L2_MFR:
                     reg = (reg1+reg2)*scale*scale;
@@ -2795,7 +2797,7 @@ void fpsg_core(
                 mf_double va_error =
                     util.calc_error(va->R, va->nnz, *model)/va->nnz;
 
-                switch(param.solver)
+                switch(param.loss)
                 {
                     case P_L2_MFR:
                         va_error = sqrt(va_error*scale*scale);
@@ -2839,7 +2841,7 @@ shared_ptr<mf_model> fpsg(
     shared_ptr<mf_model> model;
 try
 {
-    Utility util(param.solver, param.nr_threads);
+    Utility util(param.loss, param.nr_threads);
     Scheduler sched(param.nr_bins, param.nr_threads, cv_blocks);
     shared_ptr<mf_problem> tr;
     shared_ptr<mf_problem> va;
@@ -2880,9 +2882,9 @@ try
 
     util.collect_info(*tr, avg, std_dev);
 
-    if(param.solver == P_L2_MFR ||
-       param.solver == P_L1_MFR ||
-       param.solver == P_KL_MFR)
+    if(param.loss == P_L2_MFR ||
+       param.loss == P_L1_MFR ||
+       param.loss == P_KL_MFR)
         scale = max((mf_float)1e-4, std_dev);
 
     p_map = Utility::gen_random_map(tr->m);
@@ -2898,7 +2900,7 @@ try
     util.scale_problem(*va, (mf_float)1.0/scale);
     ptrs = util.grid_problem(*tr, param.nr_bins, omega_p, omega_q, blocks);
 
-    model = shared_ptr<mf_model>(Utility::init_model(param.solver,
+    model = shared_ptr<mf_model>(Utility::init_model(param.loss,
                 tr->m, tr->n, param.k, avg/scale, omega_p, omega_q),
                 [] (mf_model *ptr) { mf_destroy_model(&ptr); });
 
@@ -2921,7 +2923,7 @@ try
         }
         *cv_error /= cv_count;
 
-        switch(param.solver)
+        switch(param.loss)
         {
             case P_L2_MFR:
                 *cv_error = sqrt(*cv_error*scale*scale);
@@ -2961,7 +2963,7 @@ shared_ptr<mf_model> fpsg_on_disk(
     shared_ptr<mf_model> model;
 try
 {
-    Utility util(param.solver, param.nr_threads);
+    Utility util(param.loss, param.nr_threads);
     Scheduler sched(param.nr_bins, param.nr_threads, vector<mf_int>());
     mf_problem tr = {};
     mf_problem va = read_problem(va_path.c_str());
@@ -2979,9 +2981,9 @@ try
 
     util.collect_info_on_disk(tr_path, tr, avg, std_dev);
 
-    if(param.solver == P_L2_MFR ||
-       param.solver == P_L1_MFR ||
-       param.solver == P_KL_MFR)
+    if(param.loss == P_L2_MFR ||
+       param.loss == P_L1_MFR ||
+       param.loss == P_KL_MFR)
         scale = max((mf_float)1e-4, std_dev);
 
     p_map = Utility::gen_random_map(tr.m);
@@ -2998,7 +3000,7 @@ try
         tr.m, tr.n, param.nr_bins, scale, tr_path,
         p_map, q_map, omega_p, omega_q, blocks);
 
-    model = shared_ptr<mf_model>(Utility::init_model(param.solver,
+    model = shared_ptr<mf_model>(Utility::init_model(param.loss,
                 tr.m, tr.n, param.k, avg/scale, omega_p, omega_q),
                 [] (mf_model *ptr) { mf_destroy_model(&ptr); });
 
@@ -3024,16 +3026,16 @@ catch(exception const &e)
 
 bool check_parameter(mf_parameter param)
 {
-    if(param.solver != P_L2_MFR &&
-       param.solver != P_L1_MFR &&
-       param.solver != P_KL_MFR &&
-       param.solver != P_LR_MFC &&
-       param.solver != P_L2_MFC &&
-       param.solver != P_L1_MFC &&
-       param.solver != P_ROW_BPR_MFOC &&
-       param.solver != P_COL_BPR_MFOC)
+    if(param.loss != P_L2_MFR &&
+       param.loss != P_L1_MFR &&
+       param.loss != P_KL_MFR &&
+       param.loss != P_LR_MFC &&
+       param.loss != P_L2_MFC &&
+       param.loss != P_L1_MFC &&
+       param.loss != P_ROW_BPR_MFOC &&
+       param.loss != P_COL_BPR_MFOC)
     {
-        cerr << "unknown solver type" << endl;
+        cerr << "unknown loss type" << endl;
         return false;
     }
 
@@ -3076,7 +3078,7 @@ bool check_parameter(mf_parameter param)
         return false;
     }
 
-    if(param.solver == P_KL_MFR && !param.do_nmf)
+    if(param.loss == P_KL_MFR && !param.do_nmf)
     {
         cerr << "--nmf must be set when using generalized KL-divergence"
              << endl;
@@ -3106,7 +3108,7 @@ mf_model* mf_train_with_validation(
 
     mf_model *model_ret = new mf_model;
 
-    model_ret->solver = model->solver;
+    model_ret->loss = model->loss;
     model_ret->m = model->m;
     model_ret->n = model->n;
     model_ret->k = model->k;
@@ -3134,7 +3136,7 @@ mf_model* mf_train_with_validation_on_disk(
 
     mf_model *model_ret = new mf_model;
 
-    model_ret->solver = model->solver;
+    model_ret->loss = model->loss;
     model_ret->m = model->m;
     model_ret->n = model->n;
     model_ret->k = model->k;
@@ -3173,7 +3175,7 @@ mf_double mf_cross_validation(
     mf_int nr_bins = param.nr_bins;
     mf_int nr_blocks_per_fold = nr_bins*nr_bins/nr_folds;
 
-    Utility util(param.solver, param.nr_threads);
+    Utility util(param.loss, param.nr_threads);
 
     srand(0);
     vector<mf_int> cv_blocks;
@@ -3278,7 +3280,7 @@ mf_int mf_save_model(mf_model const *model, char const *path)
     if(!f.is_open())
         return 1;
 
-    f << "solver " << model->solver << endl;
+    f << "loss " << model->loss << endl;
     f << "m " << model->m << endl;
     f << "n " << model->n << endl;
     f << "k " << model->k << endl;
@@ -3327,7 +3329,7 @@ mf_model* mf_load_model(char const *path)
     model->P = nullptr;
     model->Q = nullptr;
 
-    f >> dummy >> model->solver >> dummy >> model->m >> dummy >> model->n >>
+    f >> dummy >> model->loss >> dummy >> model->m >> dummy >> model->n >>
          dummy >> model->k >> dummy >> model->b;
 
     try
@@ -3396,9 +3398,9 @@ mf_float mf_predict(mf_model const *model, mf_int u, mf_int v)
     if(isnan(z))
         z = model->b;
 
-    if(model->solver == P_L2_MFC &&
-       model->solver == P_L1_MFC &&
-       model->solver == P_LR_MFC)
+    if(model->loss == P_L2_MFC &&
+       model->loss == P_L1_MFC &&
+       model->loss == P_LR_MFC)
         z = z > 0.0f? 1.0f: -1.0f;
 
     return z;
@@ -3630,7 +3632,7 @@ mf_parameter mf_get_default_param()
 {
     mf_parameter param;
 
-    param.solver = P_L2_MFR;
+    param.loss = P_L2_MFR;
     param.k = 8;
     param.nr_threads = 12;
     param.nr_bins = 20;

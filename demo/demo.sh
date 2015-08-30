@@ -14,7 +14,7 @@ echo "--------------------------------"
 echo "Real-valued matrix factorization"
 echo "--------------------------------"
 # In-memory training with holdout valudation
-$train -x 0 -l2 0.05 -k 100 -t 10 -p bigdata.te.txt bigdata.tr.txt model.txt
+$train -f 0 -l2 0.05 -k 100 -t 10 -p bigdata.te.txt bigdata.tr.txt model.txt
 # Do prediction and show MAE
 $predict -e 1 bigdata.te.txt model.txt output.txt
 
@@ -25,7 +25,7 @@ echo "---------------------------"
 echo "binary matrix factorization"
 echo "---------------------------"
 # In-memory training with holdout valudation
-$train -x 5 -l2 0.01 -k 64 -p bigdata_bin.te.txt bigdata_bin.tr.txt model.txt
+$train -f 5 -l2 0.01 -k 64 -p bigdata_bin.te.txt bigdata_bin.tr.txt model.txt
 # Do prediction and show accuracy
 $predict -e 6 bigdata_bin.te.txt model.txt output.txt
 
@@ -36,7 +36,7 @@ echo "------------------------------"
 echo "one-class matrix factorization"
 echo "------------------------------"
 # In-memory training
-$train -x 10 -l2 0.01 -k 32 bigdata_one.tr.txt model.txt
+$train -f 10 -l2 0.01 -k 32 -p bigdata_one.te.txt bigdata_one.tr.txt model.txt
 # Do prediction and show row-oriented MPR
 $predict -e 10 bigdata_one.te.txt model.txt output.txt
 # Do prediction and show row-oriented AUC
