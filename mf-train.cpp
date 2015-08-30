@@ -32,7 +32,7 @@ string train_help()
 "options:\n"
 "-l1 <lambda>,<lambda>: set L1-regularization parameters for P and Q (default 0)\n"
 "  P and Q share the same lambda if only one lambda is specified\n"
-"-l2 <lambda>,<lambda>: set L2-regularization parameters of P and Q (default 0.1)\n"
+"-l2 <lambda>,<lambda>: set L2-regularization parameters for P and Q (default 0.1)\n"
 "  P and Q share the same lambda if only one lambda is specified\n"
 "-f <loss>: set loss function (default 0)\n"
 "  for real-valued matrix factorization\n"

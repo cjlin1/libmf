@@ -1754,7 +1754,7 @@ inline void L1_MFR::prepare()
 class KL_MFR : public MFSolver
 {
 public:
-    KL_MFR(Scheduler &scheduler, vector<BlockBase*> blocks, mf_float *PG, mf_float *QG,
+    KL_MFR(Scheduler &scheduler, vector<BlockBase*> &blocks, mf_float *PG, mf_float *QG,
            mf_model &model, mf_parameter param, bool &slow_only)
         : MFSolver(scheduler, blocks, PG, QG, model, param, slow_only) {}
 
@@ -3074,7 +3074,7 @@ bool check_parameter(mf_parameter param)
 
     if(param.eta <= 0)
     {
-        cerr << "learning rate should be must be greater than zero" << endl;
+        cerr << "learning rate must be greater than zero" << endl;
         return false;
     }
 
@@ -3087,7 +3087,7 @@ bool check_parameter(mf_parameter param)
 
     if(param.nr_bins <= 2*param.nr_threads)
     {
-        cerr << "Warning: insufficient blocks can slow down the training"
+        cerr << "Warning: insufficient blocks may slow down the training"
              << "process (4*nr_threads^2+1 blocks is suggested)" << endl;
     }
 
