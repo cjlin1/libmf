@@ -39,7 +39,7 @@ struct mf_problem
 
 struct mf_parameter
 {
-    mf_int loss;
+    mf_int fun;
     mf_int k;
     mf_int nr_threads;
     mf_int nr_bins;
@@ -58,7 +58,7 @@ struct mf_parameter mf_get_default_param();
 
 struct mf_model
 {
-    mf_int loss;
+    mf_int fun;
     mf_int m;
     mf_int n;
     mf_int k;

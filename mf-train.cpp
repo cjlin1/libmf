@@ -196,13 +196,13 @@ Option parse_option(int argc, char **argv)
         else if(args[i].compare("-f") == 0)
         {
             if(i == argc-1)
-                throw invalid_argument("need to specify the type of loss\
+                throw invalid_argument("need to specify loss function\
                                         after -f");
             i++;
 
             if(!is_numerical(argv[i]))
                 throw invalid_argument("-f should be followed by a number");
-            option.param.loss = atoi(argv[i]);
+            option.param.fun = atoi(argv[i]);
         }
         else if(args[i].compare("-n") == 0)
         {
