@@ -1210,7 +1210,7 @@ inline void SolverBase::calc_z(
     __m128 &XMMz, mf_int k, mf_float *p, mf_float *q)
 {
     XMMz = _mm_setzero_ps();
-    for(mf_int d = 0; d < k; d+= 4)
+    for(mf_int d = 0; d < k; d += 4)
         XMMz = _mm_add_ps(XMMz, _mm_mul_ps(
                _mm_load_ps(p+d), _mm_load_ps(q+d)));
     XMMz = _mm_hadd_ps(XMMz, XMMz);
@@ -1289,7 +1289,7 @@ inline void SolverBase::calc_z(
     __m256 &XMMz, mf_int k, mf_float *p, mf_float *q)
 {
     XMMz = _mm256_setzero_ps();
-    for(mf_int d = 0; d < k; d+= 8)
+    for(mf_int d = 0; d < k; d += 8)
         XMMz = _mm256_add_ps(XMMz, _mm256_mul_ps(
                _mm256_load_ps(p+d), _mm256_load_ps(q+d)));
     XMMz = _mm256_add_ps(XMMz, _mm256_permute2f128_ps(XMMz, XMMz, 0x1));
@@ -2097,7 +2097,7 @@ inline void BPRSolver::calc_z(
     __m128 &XMMz, mf_int k, mf_float *p, mf_float *q, mf_float *w)
 {
     XMMz = _mm_setzero_ps();
-    for(mf_int d = 0; d < k; d+= 4)
+    for(mf_int d = 0; d < k; d += 4)
         XMMz = _mm_add_ps(XMMz, _mm_mul_ps(_mm_load_ps(p+d),
                _mm_sub_ps(_mm_load_ps(q+d), _mm_load_ps(w+d))));
     XMMz = _mm_hadd_ps(XMMz, XMMz);
@@ -2252,10 +2252,10 @@ inline void BPRSolver::calc_z(
     __m256 &XMMz, mf_int k, mf_float *p, mf_float *q, mf_float *w)
 {
     XMMz = _mm256_setzero_ps();
-    for(mf_int d = 0; d < k; d+= 8)
+    for(mf_int d = 0; d < k; d += 8)
         XMMz = _mm256_add_ps(XMMz, _mm256_mul_ps(
                _mm256_load_ps(p+d), _mm256_sub_ps(
-               _mm256_load_ps(q+d), _mm256_load_ps(w+d)));
+               _mm256_load_ps(q+d), _mm256_load_ps(w+d))));
     XMMz = _mm256_add_ps(XMMz, _mm256_permute2f128_ps(XMMz, XMMz, 0x1));
     XMMz = _mm256_hadd_ps(XMMz, XMMz);
     XMMz = _mm256_hadd_ps(XMMz, XMMz);
