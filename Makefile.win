@@ -1,6 +1,14 @@
 CXX = cl.exe
 CFLAGS = /W4 /nologo /O2 /EHsc /D "_CRT_SECURE_NO_DEPRECATE"
+
+# Choose one instruction set to accelerate LIBMF
+# 1. use SSE
 CFLAGS = $(CFLAGS) /D "USESSE"
+# 2. use AVX
+#CFLAGS = $(CFLAGS) /D "USEAVX" /arch:AVX
+# 3. no acceleration
+#CFLAGS = $(CFLAGS)
+
 CFLAGS = $(CFLAGS) /D "USEOMP" /openmp
 
 TARGET = windows
