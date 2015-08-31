@@ -366,7 +366,7 @@ void BlockOnDisk::tie_to(string source_path_, mf_long first_, mf_long last_)
 
 void BlockOnDisk::reload()
 {
-    ifstream source(source_path);
+    ifstream source(source_path, ifstream::in|ifstream::binary);
     if(!source)
         throw runtime_error("can not open "+source_path);
 
