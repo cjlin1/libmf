@@ -3539,7 +3539,7 @@ pair<mf_double, mf_double> calc_mpr_auc(mf_problem *prob,
     mf_double all_u_mpr = 0;
     mf_double all_u_auc = 0;
 #if defined USEOMP
-#pragma omp parallel for schedule(static) reduction(+: all_u_mpr, all_u_auc)
+#pragma omp parallel for schedule(static) reduction(+: total_m, total_pos, all_u_mpr, all_u_auc)
 #endif
     for(mf_int i = 0; i < m; i++)
     {
