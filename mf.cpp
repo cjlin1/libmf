@@ -2029,14 +2029,14 @@ inline void L1_MFC::prepare()
     if(N->r > 0)
     {
         loss += max(0.0f, 1-z);
-        error += z > 0? 1: 0;
-        z = z > 1? 0: 1;
+        error += z > 0? 1.0f: 0.0f;
+        z = z > 1? 0.0f: 1.0f;
     }
     else
     {
         loss += max(0.0f, 1+z);
-        error += z < 0? 1: 0;
-        z = z < -1? 0: -1;
+        error += z < 0? 1.0f: 0.0f;
+        z = z < -1? 0.0f: -1.0f;
     }
 }
 #endif
