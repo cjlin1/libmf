@@ -3269,7 +3269,7 @@ mf_int mf_save_model(mf_model const *model, char const *path)
     if(!f.is_open())
         return 1;
 
-    f << "fun " << model->fun << endl;
+    f << "f " << model->fun << endl;
     f << "m " << model->m << endl;
     f << "n " << model->n << endl;
     f << "k " << model->k << endl;
