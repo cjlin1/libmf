@@ -94,6 +94,12 @@ mf_double mf_cross_validation(
     mf_int nr_folds,
     struct mf_parameter param);
 
+mf_double mf_cross_validation_on_disk(
+    char const *tr_path,
+    char const *va_path,
+    mf_int nr_folds,
+    mf_parameter param);
+
 mf_float mf_predict(struct mf_model const *model, mf_int u, mf_int v);
 
 mf_double calc_rmse(mf_problem *prob, mf_model *model);

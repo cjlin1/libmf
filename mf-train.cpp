@@ -236,9 +236,6 @@ Option parse_option(int argc, char **argv)
     if(option.nr_folds > 1 && !option.va_path.empty())
         throw invalid_argument("cannot specify both -p and -v");
 
-    if(option.nr_folds > 1 && option.on_disk)
-        throw invalid_argument("cannot specify both -v and --disk");
-
     if(i >= argc)
         throw invalid_argument("training data not specified");
 
@@ -300,7 +297,12 @@ int main(int argc, char **argv)
 
     if(option.do_cv)
     {
-        mf_cross_validation(&tr, option.nr_folds, option.param);
+        if(!option.on_disk)
+            mf_cross_validation(&tr, option.nr_folds, option.param);
+        else
+            mf_cross_validation_on_disk(
+                option.tr_path.c_str(), option.va_path.c_str(),
+                option.nr_folds, option.param);
     }
     else
     {

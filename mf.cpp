@@ -314,6 +314,7 @@ public:
     virtual mf_node* get_current() { return nullptr; }
     virtual void reload() {};
     virtual void free() {};
+    virtual mf_long get_nnz() { return 0; };
     virtual ~BlockBase() {};
 };
 
@@ -321,10 +322,12 @@ class Block : public BlockBase
 {
 public:
     Block() : first(nullptr), last(nullptr), current(nullptr) {};
+    Block(mf_node *first_, mf_node *last_) : first(first_), last(last_), current(nullptr) {};
     bool move_next() { return ++current != last; }
     mf_node* get_current() { return current; }
     void tie_to(mf_node *first_, mf_node *last_);
     void reload() { current = first-1; };
+    mf_long get_nnz() { return last-first; };
 
 private:
     mf_node* first;
@@ -348,6 +351,7 @@ public:
     void tie_to(string source_path_, mf_long first_, mf_long last_);
     void reload();
     void free() { buffer.resize(0); };
+    mf_long get_nnz() { return last-first; };
 
 private:
     mf_long first;
@@ -418,7 +422,8 @@ public:
     mf_double calc_reg2(mf_model &model, mf_float lambda_p, mf_float lambda_q,
                         vector<mf_int> &omega_p, vector<mf_int> &omega_q);
     string get_error_legend();
-    mf_double calc_error(mf_node const *R, mf_long const size,
+    mf_double calc_error(vector<BlockBase*> &blocks,
+                         vector<mf_int> &cv_block_ids,
                          mf_model const &model);
     void scale_model(mf_model &model, mf_float scale);
 
@@ -614,8 +619,10 @@ mf_double Utility::calc_reg2(mf_model &model,
            lambda_q*calc_reg2_core(model.Q, model.n, omega_q);
 }
 
-mf_double Utility::calc_error(mf_node const *R, mf_long const size,
-                              mf_model const &model)
+mf_double Utility::calc_error(
+    vector<BlockBase*> &blocks,
+    vector<mf_int> &cv_block_ids,
+    mf_model const &model)
 {
     mf_double error = 0;
     if(fun == P_L2_MFR || fun == P_L1_MFR || fun == P_KL_MFR ||
@@ -624,37 +631,42 @@ mf_double Utility::calc_error(mf_node const *R, mf_long const size,
 #if defined USEOMP
 #pragma omp parallel for num_threads(nr_threads) schedule(static) reduction(+:error)
 #endif
-        for(mf_long i = 0; i < size; i++)
+        for(mf_int i = 0; i < (mf_long)cv_block_ids.size(); i++)
         {
-            mf_node const &N = R[i];
-            mf_float z = mf_predict(&model, N.u, N.v);
-            switch(fun)
+            BlockBase *block = blocks[cv_block_ids[i]];
+            block->reload();
+            while(block->move_next())
             {
-                case P_L2_MFR:
-                    error += pow(N.r-z, 2);
-                    break;
-                case P_L1_MFR:
-                    error += abs(N.r-z);
-                    break;
-                case P_KL_MFR:
-                    error += N.r*log(N.r/z)-N.r+z;
-                    break;
-                case P_LR_MFC:
-                    if(N.r > 0)
-                        error += log(1.0+exp(-z));
-                    else
-                        error += log(1.0+exp(z));
-                    break;
-                case P_L2_MFC:
-                case P_L1_MFC:
-                    if(N.r > 0)
-                        error += z > 0? 1: 0;
-                    else
-                        error += z < 0? 1: 0;
-                    break;
-                default:
-                    throw invalid_argument("unknown error function");
-                    break;
+                mf_node const &N = *(block->get_current());
+                mf_float z = mf_predict(&model, N.u, N.v);
+                switch(fun)
+                {
+                    case P_L2_MFR:
+                        error += pow(N.r-z, 2);
+                        break;
+                    case P_L1_MFR:
+                        error += abs(N.r-z);
+                        break;
+                    case P_KL_MFR:
+                        error += N.r*log(N.r/z)-N.r+z;
+                        break;
+                    case P_LR_MFC:
+                        if(N.r > 0)
+                            error += log(1.0+exp(-z));
+                        else
+                            error += log(1.0+exp(z));
+                        break;
+                    case P_L2_MFC:
+                    case P_L1_MFC:
+                        if(N.r > 0)
+                            error += z > 0? 1: 0;
+                        else
+                            error += z < 0? 1: 0;
+                        break;
+                    default:
+                        throw invalid_argument("unknown error function");
+                        break;
+                }
             }
         }
     }
@@ -666,24 +678,40 @@ mf_double Utility::calc_error(mf_node const *R, mf_long const size,
             case P_ROW_BPR_MFOC:
             {
                 uniform_int_distribution<mf_int> distribution(0, model.n-1);
-                for(mf_long i = 0; i < size; i++)
+#if defined USEOMP
+#pragma omp parallel for num_threads(nr_threads) schedule(static) reduction(+:error)
+#endif
+                for(mf_int i = 0; i < (mf_long)cv_block_ids.size(); i++)
                 {
-                    mf_node const &N = R[i];
-                    mf_int w = distribution(generator);
-                    error += log(1+exp(mf_predict(&model, N.u, w)-
-                                       mf_predict(&model, N.u, N.v)));
+                    BlockBase *block = blocks[cv_block_ids[i]];
+                    block->reload();
+                    while(block->move_next())
+                    {
+                        mf_node const &N = *(block->get_current());
+                        mf_int w = distribution(generator);
+                        error += log(1+exp(mf_predict(&model, N.u, w)-
+                                           mf_predict(&model, N.u, N.v)));
+                    }
                 }
                 break;
             }
             case P_COL_BPR_MFOC:
             {
                 uniform_int_distribution<mf_int> distribution(0, model.m-1);
-                for(mf_long i = 0; i < size; i++)
+#if defined USEOMP
+#pragma omp parallel for num_threads(nr_threads) schedule(static) reduction(+:error)
+#endif
+                for(mf_int i = 0; i < (mf_long)cv_block_ids.size(); i++)
                 {
-                    mf_node const &N = R[i];
-                    mf_int w = distribution(generator);
-                    error += log(1+exp(mf_predict(&model, w, N.v)-
-                                       mf_predict(&model, N.u, N.v)));
+                    BlockBase *block = blocks[cv_block_ids[i]];
+                    block->reload();
+                    while(block->move_next())
+                    {
+                        mf_node const &N = *(block->get_current());
+                        mf_int w = distribution(generator);
+                        error += log(1+exp(mf_predict(&model, w, N.v)-
+                                           mf_predict(&model, N.u, N.v)));
+                    }
                 }
                 break;
             }
@@ -2702,8 +2730,15 @@ void fpsg_core(
     vector<BlockBase*> &block_ptrs,
     vector<mf_int> &omega_p,
     vector<mf_int> &omega_q,
-    shared_ptr<mf_model> &model)
+    shared_ptr<mf_model> &model,
+    vector<mf_int> cv_blocks,
+    mf_double *cv_error)
 {
+#if defined USESSE || defined USEAVX
+    auto flush_zero_mode = _MM_GET_FLUSH_ZERO_MODE();
+    _MM_SET_FLUSH_ZERO_MODE(_MM_FLUSH_ZERO_ON);
+#endif
+
     if(param.fun == P_L2_MFR ||
        param.fun == P_L1_MFR ||
        param.fun == P_KL_MFR)
@@ -2724,10 +2759,6 @@ void fpsg_core(
         }
     }
 
-#if defined USESSE || defined USEAVX
-    auto flush_zero_mode = _MM_GET_FLUSH_ZERO_MODE();
-    _MM_SET_FLUSH_ZERO_MODE(_MM_FLUSH_ZERO_ON);
-#endif
     if(!param.quiet)
     {
         cout.width(4);
@@ -2794,9 +2825,11 @@ void fpsg_core(
             cout << fixed << setprecision(4) << tr_error;
             if(va->nnz != 0)
             {
+                Block va_block(va->R, va->R+va->nnz);
+                vector<BlockBase*> va_blocks(1, &va_block);
+                vector<mf_int> va_block_ids(1, 0);
                 mf_double va_error =
-                    util.calc_error(va->R, va->nnz, *model)/va->nnz;
-
+                    util.calc_error(va_blocks, va_block_ids, *model)/va->nnz;
                 switch(param.fun)
                 {
                     case P_L2_MFR:
@@ -2826,9 +2859,30 @@ void fpsg_core(
     for(auto &thread : threads)
         thread.join();
 
+    if(cv_error != nullptr && cv_blocks.size() > 0)
+    {
+        mf_long cv_count = 0;
+        for(auto block : cv_blocks)
+            cv_count += block_ptrs[block]->get_nnz();
+
+        *cv_error = util.calc_error(block_ptrs, cv_blocks, *model)/cv_count;
+
+        switch(param.fun)
+        {
+            case P_L2_MFR:
+                *cv_error = sqrt(*cv_error*scale*scale);
+                break;
+            case P_L1_MFR:
+            case P_KL_MFR:
+                *cv_error *= scale;
+                break;
+        }
+    }
+
 #if defined USESSE || defined USEAVX
     _MM_SET_FLUSH_ZERO_MODE(flush_zero_mode);
 #endif
+
 }
 
 shared_ptr<mf_model> fpsg(
@@ -2908,32 +2962,7 @@ try
         block_ptrs[i] = &blocks[i];
 
     fpsg_core(util, sched, tr.get(), va.get(), param, scale,
-              block_ptrs, omega_p, omega_q, model);
-
-    if(cv_error != nullptr)
-    {
-        mf_long cv_count = 0;
-        *cv_error = 0;
-        for(auto block : cv_blocks)
-        {
-            cv_count += ptrs[block+1]-ptrs[block];
-            *cv_error += util.calc_error(ptrs[block],
-                                         ptrs[block+1]-ptrs[block],
-                                         *model);
-        }
-        *cv_error /= cv_count;
-
-        switch(param.fun)
-        {
-            case P_L2_MFR:
-                *cv_error = sqrt(*cv_error*scale*scale);
-                break;
-            case P_L1_MFR:
-            case P_KL_MFR:
-                *cv_error *= scale;
-                break;
-        }
-    }
+              block_ptrs, omega_p, omega_q, model, cv_blocks, cv_error);
 
     if(!param.copy_data)
     {
@@ -2958,13 +2987,15 @@ catch(exception const &e)
 shared_ptr<mf_model> fpsg_on_disk(
     const string tr_path,
     const string va_path,
-    mf_parameter param)
+    mf_parameter param,
+    vector<mf_int> cv_blocks=vector<mf_int>(),
+    mf_double *cv_error=nullptr)
 {
     shared_ptr<mf_model> model;
 try
 {
     Utility util(param.fun, param.nr_threads);
-    Scheduler sched(param.nr_bins, param.nr_threads, vector<mf_int>());
+    Scheduler sched(param.nr_bins, param.nr_threads, cv_blocks);
     mf_problem tr = {};
     mf_problem va = read_problem(va_path.c_str());
     vector<BlockOnDisk> blocks(param.nr_bins*param.nr_bins);
@@ -3008,7 +3039,7 @@ try
         block_ptrs[i] = &blocks[i];
 
     fpsg_core(util, sched, &tr, &va, param, scale,
-              block_ptrs, omega_p, omega_q, model);
+              block_ptrs, omega_p, omega_q, model, cv_blocks, cv_error);
 
     delete [] va.R;
 
@@ -3053,7 +3084,8 @@ bool check_parameter(mf_parameter param)
 
     if(param.nr_bins < 1 || param.nr_bins < param.nr_threads)
     {
-        cerr << "number of bins must be greater than number of threads" << endl;
+        cerr << "number of bins must be greater than number of threads"
+             << endl;
         return false;
     }
 
@@ -3204,6 +3236,79 @@ mf_double mf_cross_validation(
         mf_double err1 = 0;
 
         fpsg(prob, nullptr, param, cv_blocks1, &err1);
+
+        if(!quiet)
+        {
+            cout.width(4);
+            cout << fold;
+            cout.width(10);
+            cout << fixed << setprecision(4) << err1;
+            cout << endl;
+        }
+
+        err += err1;
+    }
+
+    if(!quiet)
+    {
+        cout.width(14);
+        cout.fill('=');
+        cout << "" << endl;
+        cout.fill(' ');
+        cout.width(4);
+        cout << "avg";
+        cout.width(10);
+        cout << fixed << setprecision(4) << err/nr_folds;
+        cout << endl;
+    }
+
+    return err;
+}
+
+mf_double mf_cross_validation_on_disk(
+    char const *tr_path,
+    char const *va_path,
+    mf_int nr_folds,
+    mf_parameter param)
+{
+    if(!check_parameter(param))
+        return 0;
+
+    bool quiet = param.quiet;
+    param.quiet = true;
+
+    mf_int nr_bins = param.nr_bins;
+    mf_int nr_blocks_per_fold = nr_bins*nr_bins/nr_folds;
+
+    Utility util(param.fun, param.nr_threads);
+
+    srand(0);
+    vector<mf_int> cv_blocks;
+    for(mf_int block = 0; block < nr_bins*nr_bins; block++)
+        cv_blocks.push_back(block);
+    random_shuffle(cv_blocks.begin(), cv_blocks.end());
+
+    if(!quiet)
+    {
+        cout.width(4);
+        cout << "fold";
+        cout.width(10);
+        cout << util.get_error_legend();
+        cout << endl;
+    }
+
+    mf_double err = 0;
+    for(mf_int fold = 0; fold < nr_folds; fold++)
+    {
+        mf_int begin = fold*nr_blocks_per_fold;
+        mf_int end = min((fold+1)*nr_blocks_per_fold, nr_bins*nr_bins);
+
+        vector<mf_int> cv_blocks1(cv_blocks.begin()+begin,
+                                  cv_blocks.begin()+end);
+
+        mf_double err1 = 0;
+
+        fpsg_on_disk(tr_path, va_path, param, cv_blocks1, &err1);
 
         if(!quiet)
         {
