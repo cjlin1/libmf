@@ -1083,10 +1083,11 @@ public:
 protected:
 #if defined USESSE
     static void calc_z(__m128 &XMMz, mf_int k, mf_float *p, mf_float *q);
-    virtual void init_params(__m128 &XMMlambda_p1, __m128 &XMMlambda_q1,
-                             __m128 &XMMlambda_p2, __m128 &XMMlabmda_q2,
-                             __m128 &XMMeta, __m128 &XMMrk_slow,
-                             __m128 &XMMrk_fast);
+    virtual void load_fixed_variables(
+        __m128 &XMMlambda_p1, __m128 &XMMlambda_q1,
+        __m128 &XMMlambda_p2, __m128 &XMMlabmda_q2,
+        __m128 &XMMeta, __m128 &XMMrk_slow,
+        __m128 &XMMrk_fast);
     virtual void initialize(__m128d &XMMloss, __m128d &XMMerror);
     virtual void prepare(__m128 &XMMz, __m128d &XMMloss, __m128d &XMMerror) = 0;
     virtual void sg_update(mf_int d_begin, mf_int d_end, __m128 XMMz,
@@ -1096,10 +1097,11 @@ protected:
     virtual void finalize(__m128d XMMloss, __m128d XMMerror);
 #elif defined USEAVX
     static void calc_z(__m256 &XMMz, mf_int k, mf_float *p, mf_float *q);
-    virtual void init_params(__m256 &XMMlambda_p1, __m256 &XMMlambda_q1,
-                             __m256 &XMMlambda_p2, __m256 &XMMlabmda_q2,
-                             __m256 &XMMeta, __m256 &XMMrk_slow,
-                             __m256 &XMMrk_fast);
+    virtual void load_fixed_variables(
+        __m256 &XMMlambda_p1, __m256 &XMMlambda_q1,
+        __m256 &XMMlambda_p2, __m256 &XMMlabmda_q2,
+        __m256 &XMMeta, __m256 &XMMrk_slow,
+        __m256 &XMMrk_fast);
     virtual void initialize(__m128d &XMMloss, __m128d &XMMerror);
     virtual void prepare(__m256 &XMMz, __m128d &XMMloss, __m128d &XMMerror) = 0;
     virtual void sg_update(mf_int d_begin, mf_int d_end, __m256 XMMz,
@@ -1109,7 +1111,7 @@ protected:
     virtual void finalize(__m128d XMMloss, __m128d XMMerror);
 #else
     static void calc_z(mf_float &z, mf_int k, mf_float *p, mf_float *q);
-    virtual void init_params();
+    virtual void load_fixed_variables();
     virtual void initialize();
     virtual void prepare() = 0;
     virtual void sg_update(mf_int d_begin, mf_int d_end, mf_float rk) = 0;
@@ -1158,8 +1160,10 @@ inline void SolverBase::run()
     __m128 XMMeta;
     __m128 XMMrk_slow;
     __m128 XMMrk_fast;
-    init_params(XMMlambda_p1, XMMlambda_q1, XMMlambda_p2, XMMlambda_q2, XMMeta,
-            XMMrk_slow, XMMrk_fast);
+    load_fixed_variables(XMMlambda_p1, XMMlambda_q1,
+                         XMMlambda_p2, XMMlambda_q2,
+                         XMMeta, XMMrk_slow,
+                         XMMrk_fast);
     while(!scheduler.is_terminated())
     {
         initialize(XMMloss, XMMerror);
@@ -1183,10 +1187,11 @@ inline void SolverBase::run()
     }
 }
 
-inline void SolverBase::init_params(__m128 &XMMlambda_p1, __m128 &XMMlambda_q1,
-                                    __m128 &XMMlambda_p2, __m128 &XMMlambda_q2,
-                                    __m128 &XMMeta, __m128 &XMMrk_slow,
-                                    __m128 &XMMrk_fast)
+inline void SolverBase::load_fixed_variables(
+    __m128 &XMMlambda_p1, __m128 &XMMlambda_q1,
+    __m128 &XMMlambda_p2, __m128 &XMMlambda_q2,
+    __m128 &XMMeta, __m128 &XMMrk_slow,
+    __m128 &XMMrk_fast)
 {
     XMMlambda_p1 = _mm_set1_ps(param.lambda_p1);
     XMMlambda_q1 = _mm_set1_ps(param.lambda_q1);
@@ -1237,8 +1242,9 @@ inline void SolverBase::run()
     __m256 XMMeta;
     __m256 XMMrk_slow;
     __m256 XMMrk_fast;
-    init_params(XMMlambda_p1, XMMlambda_q1, XMMlambda_p2, XMMlambda_q2, XMMeta,
-                XMMrk_slow, XMMrk_fast);
+    load_fixed_variables(XMMlambda_p1, XMMlambda_q1,
+                         XMMlambda_p2, XMMlambda_q2,
+                         XMMeta, XMMrk_slow, XMMrk_fast);
     while(!scheduler.is_terminated())
     {
         initialize(XMMloss, XMMerror);
@@ -1262,10 +1268,11 @@ inline void SolverBase::run()
     }
 }
 
-inline void SolverBase::init_params(__m256 &XMMlambda_p1, __m256 &XMMlambda_q1,
-                                    __m256 &XMMlambda_p2, __m256 &XMMlambda_q2,
-                                    __m256 &XMMeta, __m256 &XMMrk_slow,
-                                    __m256 &XMMrk_fast)
+inline void SolverBase::load_fixed_variables(
+    __m256 &XMMlambda_p1, __m256 &XMMlambda_q1,
+    __m256 &XMMlambda_p2, __m256 &XMMlambda_q2,
+    __m256 &XMMeta, __m256 &XMMrk_slow,
+    __m256 &XMMrk_fast)
 {
     XMMlambda_p1 = _mm256_set1_ps(param.lambda_p1);
     XMMlambda_q1 = _mm256_set1_ps(param.lambda_q1);
@@ -1307,7 +1314,7 @@ inline void SolverBase::finalize(__m128d XMMloss, __m128d XMMerror)
 #else
 inline void SolverBase::run()
 {
-    init_params();
+    load_fixed_variables();
     while(!scheduler.is_terminated())
     {
         initialize();
@@ -1339,7 +1346,7 @@ inline float SolverBase::qrsqrt(float x)
     x = x*(1.5f - xhalf*x*x);
     return x;
 }
-inline void SolverBase::init_params()
+inline void SolverBase::load_fixed_variables()
 {
     lambda_p1 = param.lambda_p1;
     lambda_q1 = param.lambda_q1;
@@ -2530,17 +2537,19 @@ public:
                     slow_only, is_column_oriented) {}
 protected:
 #if defined USESSE
-    void init_params(__m128 &XMMlambda_p1, __m128 &XMMlambda_q1,
-                     __m128 &XMMlambda_p2, __m128 &XMMlabmda_q2,
-                     __m128 &XMMeta, __m128 &XMMrk_slow,
-                     __m128 &XMMrk_fast);
+    void load_fixed_variables(
+        __m128 &XMMlambda_p1, __m128 &XMMlambda_q1,
+        __m128 &XMMlambda_p2, __m128 &XMMlabmda_q2,
+        __m128 &XMMeta, __m128 &XMMrk_slow,
+        __m128 &XMMrk_fast);
 #elif defined USEAVX
-    void init_params(__m256 &XMMlambda_p1, __m256 &XMMlambda_q1,
-                     __m256 &XMMlambda_p2, __m256 &XMMlabmda_q2,
-                     __m256 &XMMeta, __m256 &XMMrk_slow,
-                     __m256 &XMMrk_fast);
+    void load_fixed_variables(
+        __m256 &XMMlambda_p1, __m256 &XMMlambda_q1,
+        __m256 &XMMlambda_p2, __m256 &XMMlabmda_q2,
+        __m256 &XMMeta, __m256 &XMMrk_slow,
+        __m256 &XMMrk_fast);
 #else
-    void init_params();
+    void load_fixed_variables();
 #endif
     void prepare_negative();
 };
@@ -2556,10 +2565,11 @@ inline void COL_BPR_MFOC::prepare_negative()
 }
 
 #if defined USESSE
-inline void COL_BPR_MFOC::init_params(__m128 &XMMlambda_p1, __m128 &XMMlambda_q1,
-                                      __m128 &XMMlambda_p2, __m128 &XMMlambda_q2,
-                                      __m128 &XMMeta, __m128 &XMMrk_slow,
-                                      __m128 &XMMrk_fast)
+inline void COL_BPR_MFOC::load_fixed_variables(
+    __m128 &XMMlambda_p1, __m128 &XMMlambda_q1,
+    __m128 &XMMlambda_p2, __m128 &XMMlambda_q2,
+    __m128 &XMMeta, __m128 &XMMrk_slow,
+    __m128 &XMMrk_fast)
 {
     XMMlambda_p1 = _mm_set1_ps(param.lambda_q1);
     XMMlambda_q1 = _mm_set1_ps(param.lambda_p1);
@@ -2570,10 +2580,11 @@ inline void COL_BPR_MFOC::init_params(__m128 &XMMlambda_p1, __m128 &XMMlambda_q1
     XMMrk_fast = _mm_set1_ps((mf_float)1.0/(model.k-kALIGN));
 }
 #elif defined USEAVX
-inline void COL_BPR_MFOC::init_params(__m256 &XMMlambda_p1, __m256 &XMMlambda_q1,
-                                      __m256 &XMMlambda_p2, __m256 &XMMlambda_q2,
-                                      __m256 &XMMeta, __m256 &XMMrk_slow,
-                                      __m256 &XMMrk_fast)
+inline void COL_BPR_MFOC::load_fixed_variables(
+    __m256 &XMMlambda_p1, __m256 &XMMlambda_q1,
+    __m256 &XMMlambda_p2, __m256 &XMMlambda_q2,
+    __m256 &XMMeta, __m256 &XMMrk_slow,
+    __m256 &XMMrk_fast)
 {
     XMMlambda_p1 = _mm256_set1_ps(param.lambda_q1);
     XMMlambda_q1 = _mm256_set1_ps(param.lambda_p1);
@@ -2584,7 +2595,7 @@ inline void COL_BPR_MFOC::init_params(__m256 &XMMlambda_p1, __m256 &XMMlambda_q1
     XMMrk_fast = _mm256_set1_ps((mf_float)1.0/(model.k-kALIGN));
 }
 #else
-inline void COL_BPR_MFOC::init_params()
+inline void COL_BPR_MFOC::load_fixed_variables()
 {
     lambda_p1 = param.lambda_q1;
     lambda_q1 = param.lambda_p1;

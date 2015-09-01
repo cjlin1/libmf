@@ -46,11 +46,12 @@ values. Each line in the training file stores a tuple,
     <row_idx> <col_idx> <value>
 
 which records an entry of the training matrix. In the `demo' directory, the
-files `bigdata.tr.txt' and `bigdata.te.txt' are the training and test sets for
-a demonstration of real-valued matrix factorization (RVMF). For binary matrix
-factorization (BMF), the set of <value> is {-1, 1} as shown in
-`bigdata_bin.tr.txt' and `bigdata_bin.te.txt.' For one-class MF, all <value>'s
-are ones. See `bigdata_one.tr.txt' and `bigdata_one.te.txt' as examples.
+files `real_matrix.tr.txt' and `real_matrix.te.txt' are the training and test
+sets for a demonstration of real-valued matrix factorization (RVMF). For binary
+matrix factorization (BMF), the set of <value> is {-1, 1} as shown in
+`binary_matrix.tr.txt' and `binary_matrix.te.txt.' For one-class MF, all
+<value>'s are positive. See `all_one_matrix.tr.txt' and `all_one_matrix.te.txt'
+as examples.
 
 Note: If the values in the test set are unknown, please put dummy zeros.
 
@@ -180,11 +181,11 @@ Examples
 This section gives example commands of LIBMF using the data sets in `demo'
 directory. In `demo,' a shell script `demo.sh' can be run for demonstration.
 
-> mf-train bigdata.tr.txt model
+> mf-train real_matrix.tr.txt model
 
 train a model using the default parameters
 
-> mf-train -l1 0.05 -l2 0.01 bigdata.tr.txt model
+> mf-train -l1 0.05 -l2 0.01 real_matrix.tr.txt model
 
 train a model with the following regularization coefficients:
 
@@ -193,7 +194,7 @@ train a model with the following regularization coefficients:
     coefficient of L2-norm regularization on P = 0.01
     coefficient of L2-norm regularization on Q = 0.01
 
-> mf-train -l1 0.015,0 -l2 0.01,0.005 bigdata.tr.txt model
+> mf-train -l1 0.015,0 -l2 0.01,0.005 real_matrix.tr.txt model
 
 train a model with the following regularization coefficients:
 
@@ -202,7 +203,7 @@ train a model with the following regularization coefficients:
     coefficient of L2-norm regularization on P = 0.01
     coefficient of L2-norm regularization on Q = 0.03
 
-> mf-train -f 5 -l1 0,0.02 -k 100 -t 30 -r 0.02 -s 4 bigdata_bin.tr.txt model
+> mf-train -f 5 -l1 0,0.02 -k 100 -t 30 -r 0.02 -s 4 binary_matrix.tr.txt model
 
 train a BMF model using logarithmic loss and the following parameters:
 
@@ -213,31 +214,31 @@ train a BMF model using logarithmic loss and the following parameters:
     learning rate = 0.02
     threads = 4
 
-> mf-train -p bigdata.te.txt bigdata.tr.txt model
+> mf-train -p real_matrix.te.txt real_matrix.tr.txt model
 
-use bigdata.te.txt for hold-out validation
+use real_matrix.te.txt for hold-out validation
 
-> mf-train -v 5 bigdata.tr.txt
+> mf-train -v 5 real_matrix.tr.txt
 
 do five fold cross validation
 
-> mf-train -f 2 --nmf bigdata.tr.txt
+> mf-train -f 2 --nmf real_matrix.tr.txt
 
 do non-negative matrix factorization with generalized KL-divergence
 
-> mf-train --quiet bigdata.tr.txt
+> mf-train --quiet real_matrix.tr.txt
 
 do not print message to screen
 
-> mf-train --disk bigdata.tr.txt
+> mf-train --disk real_matrix.tr.txt
 
 do disk-level training
 
-> mf-predict bigdata.te.txt model output
+> mf-predict real_matrix.te.txt model output
 
 do prediction
 
-> mf-predict -e 1 bigdata.te.txt model output
+> mf-predict -e 1 real_matrix.te.txt model output
 
 do prediction and output MAE
 
