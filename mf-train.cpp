@@ -301,8 +301,7 @@ int main(int argc, char **argv)
             mf_cross_validation(&tr, option.nr_folds, option.param);
         else
             mf_cross_validation_on_disk(
-                option.tr_path.c_str(), option.va_path.c_str(),
-                option.nr_folds, option.param);
+                option.tr_path.c_str(), option.nr_folds, option.param);
     }
     else
     {

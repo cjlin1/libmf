@@ -95,8 +95,7 @@ mf_double mf_cross_validation(
     struct mf_parameter param);
 
 mf_double mf_cross_validation_on_disk(
-    char const *tr_path,
-    char const *va_path,
+    char const *prob,
     mf_int nr_folds,
     mf_parameter param);
 
