@@ -3126,6 +3126,121 @@ bool check_parameter(mf_parameter param)
     return true;
 }
 
+class CrossValidatorBase
+{
+public:
+    CrossValidatorBase(mf_parameter param_, mf_int nr_folds_);
+    mf_double do_cross_validation();
+    virtual mf_double do_cv1(vector<mf_int> &hiden_blocks) { return 0; };
+protected:
+    mf_parameter param;
+    mf_int nr_bins;
+    mf_int nr_folds;
+    mf_int nr_blocks_per_fold;
+    bool quiet;
+    Utility util;
+    mf_double cv_error;
+};
+
+CrossValidatorBase::CrossValidatorBase(mf_parameter param_, mf_int nr_folds_)
+    : param(param_), nr_bins(param_.nr_bins), nr_folds(nr_folds_),
+      nr_blocks_per_fold(nr_bins*nr_bins/nr_folds), quiet(param_.quiet),
+      util(param.fun, param.nr_threads), cv_error(0)
+{
+    param.quiet = true;
+}
+
+mf_double CrossValidatorBase::do_cross_validation()
+{
+    vector<mf_int> cv_blocks;
+    srand(0);
+    for(mf_int block = 0; block < nr_bins*nr_bins; block++)
+        cv_blocks.push_back(block);
+    random_shuffle(cv_blocks.begin(), cv_blocks.end());
+
+    if(!quiet)
+    {
+        cout.width(4);
+        cout << "fold";
+        cout.width(10);
+        cout << util.get_error_legend();
+        cout << endl;
+    }
+
+    cv_error = 0;
+
+    for(mf_int fold = 0; fold < nr_folds; fold++)
+    {
+        mf_int begin = fold*nr_blocks_per_fold;
+        mf_int end = min((fold+1)*nr_blocks_per_fold, nr_bins*nr_bins);
+        vector<mf_int> hiden_blocks(cv_blocks.begin()+begin,
+                                    cv_blocks.begin()+end);
+
+        mf_double err = do_cv1(hiden_blocks);
+        cv_error += err;
+
+        if(!quiet)
+        {
+            cout.width(4);
+            cout << fold;
+            cout.width(10);
+            cout << fixed << setprecision(4) << err;
+            cout << endl;
+        }
+    }
+
+    if(!quiet)
+    {
+        cout.width(14);
+        cout.fill('=');
+        cout << "" << endl;
+        cout.fill(' ');
+        cout.width(4);
+        cout << "avg";
+        cout.width(10);
+        cout << fixed << setprecision(4) << cv_error/nr_folds;
+        cout << endl;
+    }
+
+    return cv_error/nr_folds;
+}
+
+class CrossValidator : public CrossValidatorBase
+{
+public:
+    CrossValidator(
+        mf_parameter param_, mf_int nr_folds_, mf_problem const *prob_)
+        : CrossValidatorBase(param_, nr_folds_), prob(prob_) {};
+    mf_double do_cv1(vector<mf_int> &hiden_blocks);
+private:
+    mf_problem const *prob;
+};
+
+mf_double CrossValidator::do_cv1(vector<mf_int> &hiden_blocks)
+{
+    mf_double err = 0;
+    fpsg(prob, nullptr, param, hiden_blocks, &err);
+    return err;
+}
+
+class CrossValidatorOnDisk : public CrossValidatorBase
+{
+public:
+    CrossValidatorOnDisk(
+        mf_parameter param_, mf_int nr_folds_, string data_path_)
+        : CrossValidatorBase(param_, nr_folds_), data_path(data_path_) {};
+    mf_double do_cv1(vector<mf_int> &hiden_blocks);
+private:
+    string data_path;
+};
+
+mf_double CrossValidatorOnDisk::do_cv1(vector<mf_int> &hiden_blocks)
+{
+    mf_double err = 0;
+    fpsg_on_disk(data_path, string(), param, hiden_blocks, &err);
+    return err;
+}
+
 } // unnamed namespace
 
 mf_model* mf_train_with_validation(
@@ -3163,8 +3278,8 @@ mf_model* mf_train_with_validation_on_disk(
     if(!check_parameter(param))
         return nullptr;
 
-    shared_ptr<mf_model> model = fpsg_on_disk(string(tr_path),
-                                              string(va_path), param);
+    shared_ptr<mf_model> model = fpsg_on_disk(
+        string(tr_path), string(va_path), param);
 
     mf_model *model_ret = new mf_model;
 
@@ -3190,7 +3305,7 @@ mf_model* mf_train(mf_problem const *prob, mf_parameter param)
 
 mf_model* mf_train_on_disk(char const *tr_path, mf_parameter param)
 {
-    return mf_train_with_validation_on_disk(tr_path, nullptr, param);
+    return mf_train_with_validation_on_disk(tr_path, "", param);
 }
 
 mf_double mf_cross_validation(
@@ -3199,143 +3314,24 @@ mf_double mf_cross_validation(
     mf_parameter param)
 {
     if(!check_parameter(param))
-        return 0;
+        throw invalid_argument("wrong parameters");
 
-    bool quiet = param.quiet;
-    param.quiet = true;
+    CrossValidator validator(param, nr_folds, prob);
 
-    mf_int nr_bins = param.nr_bins;
-    mf_int nr_blocks_per_fold = nr_bins*nr_bins/nr_folds;
-
-    Utility util(param.fun, param.nr_threads);
-
-    srand(0);
-    vector<mf_int> cv_blocks;
-    for(mf_int block = 0; block < nr_bins*nr_bins; block++)
-        cv_blocks.push_back(block);
-    random_shuffle(cv_blocks.begin(), cv_blocks.end());
-
-    if(!quiet)
-    {
-        cout.width(4);
-        cout << "fold";
-        cout.width(10);
-        cout << util.get_error_legend();
-        cout << endl;
-    }
-
-    mf_double err = 0;
-    for(mf_int fold = 0; fold < nr_folds; fold++)
-    {
-        mf_int begin = fold*nr_blocks_per_fold;
-        mf_int end = min((fold+1)*nr_blocks_per_fold, nr_bins*nr_bins);
-
-        vector<mf_int> cv_blocks1(cv_blocks.begin()+begin,
-                                  cv_blocks.begin()+end);
-
-        mf_double err1 = 0;
-
-        fpsg(prob, nullptr, param, cv_blocks1, &err1);
-
-        if(!quiet)
-        {
-            cout.width(4);
-            cout << fold;
-            cout.width(10);
-            cout << fixed << setprecision(4) << err1;
-            cout << endl;
-        }
-
-        err += err1;
-    }
-
-    if(!quiet)
-    {
-        cout.width(14);
-        cout.fill('=');
-        cout << "" << endl;
-        cout.fill(' ');
-        cout.width(4);
-        cout << "avg";
-        cout.width(10);
-        cout << fixed << setprecision(4) << err/nr_folds;
-        cout << endl;
-    }
-
-    return err;
+    return validator.do_cross_validation();
 }
 
 mf_double mf_cross_validation_on_disk(
-    char const *tr_path,
-    char const *va_path,
+    char const *prob,
     mf_int nr_folds,
     mf_parameter param)
 {
     if(!check_parameter(param))
-        return 0;
+        throw invalid_argument("wrong parameters");
 
-    bool quiet = param.quiet;
-    param.quiet = true;
+    CrossValidatorOnDisk validator(param, nr_folds, string(prob));
 
-    mf_int nr_bins = param.nr_bins;
-    mf_int nr_blocks_per_fold = nr_bins*nr_bins/nr_folds;
-
-    Utility util(param.fun, param.nr_threads);
-
-    srand(0);
-    vector<mf_int> cv_blocks;
-    for(mf_int block = 0; block < nr_bins*nr_bins; block++)
-        cv_blocks.push_back(block);
-    random_shuffle(cv_blocks.begin(), cv_blocks.end());
-
-    if(!quiet)
-    {
-        cout.width(4);
-        cout << "fold";
-        cout.width(10);
-        cout << util.get_error_legend();
-        cout << endl;
-    }
-
-    mf_double err = 0;
-    for(mf_int fold = 0; fold < nr_folds; fold++)
-    {
-        mf_int begin = fold*nr_blocks_per_fold;
-        mf_int end = min((fold+1)*nr_blocks_per_fold, nr_bins*nr_bins);
-
-        vector<mf_int> cv_blocks1(cv_blocks.begin()+begin,
-                                  cv_blocks.begin()+end);
-
-        mf_double err1 = 0;
-
-        fpsg_on_disk(tr_path, va_path, param, cv_blocks1, &err1);
-
-        if(!quiet)
-        {
-            cout.width(4);
-            cout << fold;
-            cout.width(10);
-            cout << fixed << setprecision(4) << err1;
-            cout << endl;
-        }
-
-        err += err1;
-    }
-
-    if(!quiet)
-    {
-        cout.width(14);
-        cout.fill('=');
-        cout << "" << endl;
-        cout.fill(' ');
-        cout.width(4);
-        cout << "avg";
-        cout.width(10);
-        cout << fixed << setprecision(4) << err/nr_folds;
-        cout << endl;
-    }
-
-    return err;
+    return validator.do_cross_validation();
 }
 
 mf_problem read_problem(string path)
