@@ -668,6 +668,7 @@ mf_double Utility::calc_error(
                         break;
                 }
             }
+            block->free();
         }
     }
     else
@@ -692,6 +693,7 @@ mf_double Utility::calc_error(
                         error += log(1+exp(mf_predict(&model, N.u, w)-
                                            mf_predict(&model, N.u, N.v)));
                     }
+                    block->free();
                 }
                 break;
             }
@@ -712,6 +714,7 @@ mf_double Utility::calc_error(
                         error += log(1+exp(mf_predict(&model, w, N.v)-
                                            mf_predict(&model, N.u, N.v)));
                     }
+                    block->free();
                 }
                 break;
             }
