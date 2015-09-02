@@ -1215,7 +1215,7 @@ inline void SolverBase::run()
     }
 }
 
-inline void SolverBase::load_fixed_variables(
+void SolverBase::load_fixed_variables(
     __m128 &XMMlambda_p1, __m128 &XMMlambda_q1,
     __m128 &XMMlambda_p2, __m128 &XMMlambda_q2,
     __m128 &XMMeta, __m128 &XMMrk_slow,
@@ -1230,7 +1230,7 @@ inline void SolverBase::load_fixed_variables(
     XMMrk_fast = _mm_set1_ps((mf_float)1.0/(model.k-kALIGN));
 }
 
-inline void SolverBase::initialize(__m128d &XMMloss, __m128d &XMMerror)
+void SolverBase::initialize(__m128d &XMMloss, __m128d &XMMerror)
 {
     XMMloss = _mm_setzero_pd();
     XMMerror = _mm_setzero_pd();
@@ -1250,7 +1250,7 @@ inline void SolverBase::calc_z(
     XMMz = _mm_hadd_ps(XMMz, XMMz);
 }
 
-inline void SolverBase::finalize(__m128d XMMloss, __m128d XMMerror)
+void SolverBase::finalize(__m128d XMMloss, __m128d XMMerror)
 {
     _mm_store_sd(&loss, XMMloss);
     _mm_store_sd(&error, XMMerror);
@@ -1296,7 +1296,7 @@ inline void SolverBase::run()
     }
 }
 
-inline void SolverBase::load_fixed_variables(
+void SolverBase::load_fixed_variables(
     __m256 &XMMlambda_p1, __m256 &XMMlambda_q1,
     __m256 &XMMlambda_p2, __m256 &XMMlambda_q2,
     __m256 &XMMeta, __m256 &XMMrk_slow,
@@ -1311,7 +1311,7 @@ inline void SolverBase::load_fixed_variables(
     XMMrk_fast = _mm256_set1_ps((mf_float)1.0/(model.k-kALIGN));
 }
 
-inline void SolverBase::initialize(__m128d &XMMloss, __m128d &XMMerror)
+void SolverBase::initialize(__m128d &XMMloss, __m128d &XMMerror)
 {
     XMMloss = _mm_setzero_pd();
     XMMerror = _mm_setzero_pd();
@@ -1332,7 +1332,7 @@ inline void SolverBase::calc_z(
     XMMz = _mm256_hadd_ps(XMMz, XMMz);
 }
 
-inline void SolverBase::finalize(__m128d XMMloss, __m128d XMMerror)
+void SolverBase::finalize(__m128d XMMloss, __m128d XMMerror)
 {
     _mm_store_sd(&loss, XMMloss);
     _mm_store_sd(&error, XMMerror);
@@ -1374,7 +1374,8 @@ inline float SolverBase::qrsqrt(float x)
     x = x*(1.5f - xhalf*x*x);
     return x;
 }
-inline void SolverBase::load_fixed_variables()
+
+void SolverBase::load_fixed_variables()
 {
     lambda_p1 = param.lambda_p1;
     lambda_q1 = param.lambda_q1;
@@ -1383,7 +1384,8 @@ inline void SolverBase::load_fixed_variables()
     rk_slow = (mf_float)1.0/kALIGN;
     rk_fast = (mf_float)1.0/(model.k-kALIGN);
 }
-inline void SolverBase::initialize()
+
+void SolverBase::initialize()
 {
     loss = 0.0;
     error = 0.0;
@@ -1399,7 +1401,7 @@ inline void SolverBase::calc_z(mf_float &z, mf_int k, mf_float *p, mf_float *q)
         z += p[d]*q[d];
 }
 
-inline void SolverBase::finalize()
+void SolverBase::finalize()
 {
     block->free();
     scheduler.put_job(bid, loss, error);
@@ -1435,7 +1437,7 @@ protected:
 };
 
 #if defined USESSE
-inline void MFSolver::sg_update(mf_int d_begin, mf_int d_end, __m128 XMMz,
+void MFSolver::sg_update(mf_int d_begin, mf_int d_end, __m128 XMMz,
                                 __m128 XMMlambda_p1, __m128 XMMlambda_q1,
                                 __m128 XMMlambda_p2, __m128 XMMlambda_q2,
                                 __m128 XMMeta, __m128 XMMrk)
@@ -1523,7 +1525,7 @@ inline void MFSolver::sg_update(mf_int d_begin, mf_int d_end, __m128 XMMz,
     _mm_store_ss(qG, XMMqG);
 }
 #elif defined USEAVX
-inline void MFSolver::sg_update(mf_int d_begin, mf_int d_end, __m256 XMMz,
+void MFSolver::sg_update(mf_int d_begin, mf_int d_end, __m256 XMMz,
                                 __m256 XMMlambda_p1, __m256 XMMlambda_q1,
                                 __m256 XMMlambda_p2, __m256 XMMlambda_q2,
                                 __m256 XMMeta, __m256 XMMrk)
@@ -1621,7 +1623,7 @@ inline void MFSolver::sg_update(mf_int d_begin, mf_int d_end, __m256 XMMz,
     _mm_store_ss(qG, _mm256_castps256_ps128(XMMqG));
 }
 #else
-inline void MFSolver::sg_update(mf_int d_begin, mf_int d_end, mf_float rk)
+void MFSolver::sg_update(mf_int d_begin, mf_int d_end, mf_float rk)
 {
     mf_float eta_p = param.eta*qrsqrt(*pG);
     mf_float eta_q = param.eta*qrsqrt(*qG);
@@ -1691,7 +1693,7 @@ protected:
 };
 
 #if defined USESSE
-inline void L2_MFR::prepare(__m128 &XMMz, __m128d &XMMloss, __m128d &XMMerror)
+void L2_MFR::prepare(__m128 &XMMz, __m128d &XMMloss, __m128d &XMMerror)
 {
     calc_z(XMMz, model.k, p, q);
     XMMz = _mm_sub_ps(_mm_set1_ps(N->r), XMMz);
@@ -1700,7 +1702,7 @@ inline void L2_MFR::prepare(__m128 &XMMz, __m128d &XMMloss, __m128d &XMMerror)
     XMMerror = XMMloss;
 }
 #elif defined USEAVX
-inline void L2_MFR::prepare(__m256 &XMMz, __m128d &XMMloss, __m128d &XMMerror)
+void L2_MFR::prepare(__m256 &XMMz, __m128d &XMMloss, __m128d &XMMerror)
 {
     calc_z(XMMz, model.k, p, q);
     XMMz = _mm256_sub_ps(_mm256_set1_ps(N->r), XMMz);
@@ -1710,7 +1712,7 @@ inline void L2_MFR::prepare(__m256 &XMMz, __m128d &XMMloss, __m128d &XMMerror)
     XMMerror = XMMloss;
 }
 #else
-inline void L2_MFR::prepare()
+void L2_MFR::prepare()
 {
     calc_z(z, model.k, p, q);
     z = N->r-z;
@@ -1736,7 +1738,7 @@ protected:
 };
 
 #if defined USESSE
-inline void L1_MFR::prepare(__m128 &XMMz, __m128d &XMMloss, __m128d &XMMerror)
+void L1_MFR::prepare(__m128 &XMMz, __m128d &XMMloss, __m128d &XMMerror)
 {
     calc_z(XMMz, model.k, p, q);
     XMMz = _mm_sub_ps(_mm_set1_ps(N->r), XMMz);
@@ -1749,7 +1751,7 @@ inline void L1_MFR::prepare(__m128 &XMMz, __m128d &XMMloss, __m128d &XMMerror)
            _mm_set1_ps(-1.0f)));
 }
 #elif defined USEAVX
-inline void L1_MFR::prepare(__m256 &XMMz, __m128d &XMMloss, __m128d &XMMerror)
+void L1_MFR::prepare(__m256 &XMMz, __m128d &XMMloss, __m128d &XMMerror)
 {
     calc_z(XMMz, model.k, p, q);
     XMMz = _mm256_sub_ps(_mm256_set1_ps(N->r), XMMz);
@@ -1762,7 +1764,7 @@ inline void L1_MFR::prepare(__m256 &XMMz, __m128d &XMMloss, __m128d &XMMerror)
            _mm256_set1_ps(0.0f), _CMP_LT_OS), _mm256_set1_ps(-1.0f)));
 }
 #else
-inline void L1_MFR::prepare()
+void L1_MFR::prepare()
 {
     calc_z(z, model.k, p, q);
     z = N->r-z;
@@ -1793,7 +1795,7 @@ protected:
 };
 
 #if defined USESSE
-inline void KL_MFR::prepare(__m128 &XMMz, __m128d &XMMloss, __m128d &XMMerror)
+void KL_MFR::prepare(__m128 &XMMz, __m128d &XMMloss, __m128d &XMMerror)
 {
     calc_z(XMMz, model.k, p, q);
     XMMz = _mm_div_ps(_mm_set1_ps(N->r), XMMz);
@@ -1804,7 +1806,7 @@ inline void KL_MFR::prepare(__m128 &XMMz, __m128d &XMMloss, __m128d &XMMerror)
     XMMz = _mm_sub_ps(XMMz, _mm_set1_ps(1.0f));
 }
 #elif defined USEAVX
-inline void KL_MFR::prepare(__m256 &XMMz, __m128d &XMMloss, __m128d &XMMerror)
+void KL_MFR::prepare(__m256 &XMMz, __m128d &XMMloss, __m128d &XMMerror)
 {
     calc_z(XMMz, model.k, p, q);
     XMMz = _mm256_div_ps(_mm256_set1_ps(N->r), XMMz);
@@ -1815,7 +1817,7 @@ inline void KL_MFR::prepare(__m256 &XMMz, __m128d &XMMloss, __m128d &XMMerror)
     XMMz = _mm256_sub_ps(XMMz, _mm256_set1_ps(1.0f));
 }
 #else
-inline void KL_MFR::prepare()
+void KL_MFR::prepare()
 {
     calc_z(z, model.k, p, q);
     z = N->r/z;
@@ -1843,7 +1845,7 @@ protected:
 };
 
 #if defined USESSE
-inline void LR_MFC::prepare(__m128 &XMMz, __m128d &XMMloss, __m128d &XMMerror)
+void LR_MFC::prepare(__m128 &XMMz, __m128d &XMMloss, __m128d &XMMerror)
 {
     calc_z(XMMz, model.k, p, q);
     _mm_store_ss(&z, XMMz);
@@ -1862,7 +1864,7 @@ inline void LR_MFC::prepare(__m128 &XMMz, __m128d &XMMloss, __m128d &XMMerror)
     XMMerror = XMMloss;
 }
 #elif defined USEAVX
-inline void LR_MFC::prepare(__m256 &XMMz, __m128d &XMMloss, __m128d &XMMerror)
+void LR_MFC::prepare(__m256 &XMMz, __m128d &XMMloss, __m128d &XMMerror)
 {
     calc_z(XMMz, model.k, p, q);
     _mm_store_ss(&z, _mm256_castps256_ps128(XMMz));
@@ -1881,7 +1883,7 @@ inline void LR_MFC::prepare(__m256 &XMMz, __m128d &XMMloss, __m128d &XMMerror)
     XMMerror = XMMloss;
 }
 #else
-inline void LR_MFC::prepare()
+void LR_MFC::prepare()
 {
     calc_z(z, model.k, p, q);
     if(N->r > 0)
@@ -1920,7 +1922,7 @@ protected:
 };
 
 #if defined USESSE
-inline void L2_MFC::prepare(__m128 &XMMz, __m128d &XMMloss, __m128d &XMMerror)
+void L2_MFC::prepare(__m128 &XMMz, __m128d &XMMloss, __m128d &XMMerror)
 {
     calc_z(XMMz, model.k, p, q);
     if(N->r > 0)
@@ -1943,7 +1945,7 @@ inline void L2_MFC::prepare(__m128 &XMMz, __m128d &XMMloss, __m128d &XMMerror)
               _mm_mul_ps(XMMz, XMMz)));
 }
 #elif defined USEAVX
-inline void L2_MFC::prepare(__m256 &XMMz, __m128d &XMMloss, __m128d &XMMerror)
+void L2_MFC::prepare(__m256 &XMMz, __m128d &XMMloss, __m128d &XMMerror)
 {
     calc_z(XMMz, model.k, p, q);
     if(N->r > 0)
@@ -1969,7 +1971,7 @@ inline void L2_MFC::prepare(__m256 &XMMz, __m128d &XMMloss, __m128d &XMMerror)
               _mm256_castps256_ps128(XMMz))));
 }
 #else
-inline void L2_MFC::prepare()
+void L2_MFC::prepare()
 {
     calc_z(z, model.k, p, q);
     if(N->r > 0)
@@ -2004,7 +2006,7 @@ protected:
 };
 
 #if defined USESSE
-inline void L1_MFC::prepare(__m128 &XMMz, __m128d &XMMloss, __m128d &XMMerror)
+void L1_MFC::prepare(__m128 &XMMz, __m128d &XMMloss, __m128d &XMMerror)
 {
     calc_z(XMMz, model.k, p, q);
     if(N->r > 0)
@@ -2031,7 +2033,7 @@ inline void L1_MFC::prepare(__m128 &XMMz, __m128d &XMMloss, __m128d &XMMerror)
     }
 }
 #elif defined USEAVX
-inline void L1_MFC::prepare(__m256 &XMMz, __m128d &XMMloss, __m128d &XMMerror)
+void L1_MFC::prepare(__m256 &XMMz, __m128d &XMMloss, __m128d &XMMerror)
 {
     calc_z(XMMz, model.k, p, q);
     if(N->r > 0)
@@ -2058,7 +2060,7 @@ inline void L1_MFC::prepare(__m256 &XMMz, __m128d &XMMloss, __m128d &XMMerror)
     }
 }
 #else
-inline void L1_MFC::prepare()
+void L1_MFC::prepare()
 {
     calc_z(z, model.k, p, q);
     if(N->r > 0)
@@ -2139,7 +2141,7 @@ inline void BPRSolver::calc_z(
     XMMz = _mm_hadd_ps(XMMz, XMMz);
 }
 
-inline void BPRSolver::initialize(__m128d &XMMloss, __m128d &XMMerror)
+void BPRSolver::initialize(__m128d &XMMloss, __m128d &XMMerror)
 {
     XMMloss = _mm_setzero_pd();
     XMMerror = _mm_setzero_pd();
@@ -2149,7 +2151,7 @@ inline void BPRSolver::initialize(__m128d &XMMloss, __m128d &XMMerror)
     bpr_bid = scheduler.get_bpr_job(bid, is_column_oriented);
 }
 
-inline void BPRSolver::finalize(__m128d XMMloss, __m128d XMMerror)
+void BPRSolver::finalize(__m128d XMMloss, __m128d XMMerror)
 {
     _mm_store_sd(&loss, XMMloss);
     _mm_store_sd(&error, XMMerror);
@@ -2157,7 +2159,7 @@ inline void BPRSolver::finalize(__m128d XMMloss, __m128d XMMerror)
     scheduler.put_bpr_job(bid, bpr_bid);
 }
 
-inline void BPRSolver::sg_update(mf_int d_begin, mf_int d_end, __m128 XMMz,
+void BPRSolver::sg_update(mf_int d_begin, mf_int d_end, __m128 XMMz,
                                  __m128 XMMlambda_p1, __m128 XMMlambda_q1,
                                  __m128 XMMlambda_p2, __m128 XMMlambda_q2,
                                  __m128 XMMeta, __m128 XMMrk)
@@ -2271,8 +2273,8 @@ inline void BPRSolver::sg_update(mf_int d_begin, mf_int d_end, __m128 XMMz,
     _mm_store_ss(wG, XMMwG);
 }
 
-inline void BPRSolver::prepare(__m128 &XMMz, __m128d &XMMloss,
-                               __m128d &XMMerror)
+void BPRSolver::prepare(
+    __m128 &XMMz, __m128d &XMMloss, __m128d &XMMerror)
 {
     prepare_negative();
     calc_z(XMMz, model.k, p, q, w);
@@ -2296,7 +2298,7 @@ inline void BPRSolver::calc_z(
     XMMz = _mm256_hadd_ps(XMMz, XMMz);
 }
 
-inline void BPRSolver::initialize(__m128d &XMMloss, __m128d &XMMerror)
+void BPRSolver::initialize(__m128d &XMMloss, __m128d &XMMerror)
 {
     XMMloss = _mm_setzero_pd();
     XMMerror = _mm_setzero_pd();
@@ -2306,7 +2308,7 @@ inline void BPRSolver::initialize(__m128d &XMMloss, __m128d &XMMerror)
     bpr_bid = scheduler.get_bpr_job(bid, is_column_oriented);
 }
 
-inline void BPRSolver::finalize(__m128d XMMloss, __m128d XMMerror)
+void BPRSolver::finalize(__m128d XMMloss, __m128d XMMerror)
 {
     _mm_store_sd(&loss, XMMloss);
     _mm_store_sd(&error, XMMerror);
@@ -2314,7 +2316,7 @@ inline void BPRSolver::finalize(__m128d XMMloss, __m128d XMMerror)
     scheduler.put_bpr_job(bid, bpr_bid);
 }
 
-inline void BPRSolver::sg_update(mf_int d_begin, mf_int d_end, __m256 XMMz,
+void BPRSolver::sg_update(mf_int d_begin, mf_int d_end, __m256 XMMz,
                                  __m256 XMMlambda_p1, __m256 XMMlambda_q1,
                                  __m256 XMMlambda_p2, __m256 XMMlambda_q2,
                                  __m256 XMMeta, __m256 XMMrk)
@@ -2447,8 +2449,8 @@ inline void BPRSolver::sg_update(mf_int d_begin, mf_int d_end, __m256 XMMz,
     _mm_store_ss(wG, _mm256_castps256_ps128(XMMwG));
 }
 
-inline void BPRSolver::prepare(__m256 &XMMz, __m128d &XMMloss,
-                               __m128d &XMMerror)
+void BPRSolver::prepare(
+    __m256 &XMMz, __m128d &XMMloss, __m128d &XMMerror)
 {
     prepare_negative();
     calc_z(XMMz, model.k, p, q, w);
@@ -2467,7 +2469,7 @@ inline void BPRSolver::calc_z(
         z += p[d]*(q[d]-w[d]);
 }
 
-inline void BPRSolver::initialize()
+void BPRSolver::initialize()
 {
     loss = 0.0;
     error = 0.0;
@@ -2477,13 +2479,13 @@ inline void BPRSolver::initialize()
     bpr_bid = scheduler.get_bpr_job(bid, is_column_oriented);
 }
 
-inline void BPRSolver::finalize()
+void BPRSolver::finalize()
 {
     scheduler.put_job(bid, loss, error);
     scheduler.put_bpr_job(bid, bpr_bid);
 }
 
-inline void BPRSolver::sg_update(mf_int d_begin, mf_int d_end, mf_float rk)
+void BPRSolver::sg_update(mf_int d_begin, mf_int d_end, mf_float rk)
 {
     mf_float eta_p = param.eta*qrsqrt(*pG);
     mf_float eta_q = param.eta*qrsqrt(*qG);
@@ -2543,7 +2545,7 @@ inline void BPRSolver::sg_update(mf_int d_begin, mf_int d_end, mf_float rk)
     *wG += wG1*rk;
 }
 
-inline void BPRSolver::prepare()
+void BPRSolver::prepare()
 {
     prepare_negative();
     calc_z(z, model.k, p, q, w);
@@ -2582,7 +2584,7 @@ protected:
     void prepare_negative();
 };
 
-inline void COL_BPR_MFOC::prepare_negative()
+void COL_BPR_MFOC::prepare_negative()
 {
     mf_int negative = scheduler.get_negative(bid, bpr_bid, model.m, model.n,
                                              is_column_oriented);
@@ -2593,7 +2595,7 @@ inline void COL_BPR_MFOC::prepare_negative()
 }
 
 #if defined USESSE
-inline void COL_BPR_MFOC::load_fixed_variables(
+void COL_BPR_MFOC::load_fixed_variables(
     __m128 &XMMlambda_p1, __m128 &XMMlambda_q1,
     __m128 &XMMlambda_p2, __m128 &XMMlambda_q2,
     __m128 &XMMeta, __m128 &XMMrk_slow,
@@ -2608,7 +2610,7 @@ inline void COL_BPR_MFOC::load_fixed_variables(
     XMMrk_fast = _mm_set1_ps((mf_float)1.0/(model.k-kALIGN));
 }
 #elif defined USEAVX
-inline void COL_BPR_MFOC::load_fixed_variables(
+void COL_BPR_MFOC::load_fixed_variables(
     __m256 &XMMlambda_p1, __m256 &XMMlambda_q1,
     __m256 &XMMlambda_p2, __m256 &XMMlambda_q2,
     __m256 &XMMeta, __m256 &XMMrk_slow,
@@ -2623,7 +2625,7 @@ inline void COL_BPR_MFOC::load_fixed_variables(
     XMMrk_fast = _mm256_set1_ps((mf_float)1.0/(model.k-kALIGN));
 }
 #else
-inline void COL_BPR_MFOC::load_fixed_variables()
+void COL_BPR_MFOC::load_fixed_variables()
 {
     lambda_p1 = param.lambda_q1;
     lambda_q1 = param.lambda_p1;
@@ -2647,7 +2649,7 @@ protected:
     void prepare_negative();
 };
 
-inline void ROW_BPR_MFOC::prepare_negative()
+void ROW_BPR_MFOC::prepare_negative()
 {
     mf_int negative = scheduler.get_negative(bid, bpr_bid, model.m, model.n,
                                              is_column_oriented);
