@@ -36,7 +36,7 @@ string train_help()
 "  P and Q share the same lambda if only one lambda is specified\n"
 "-f <loss>: set loss function (default 0)\n"
 "  for real-valued matrix factorization\n"
-"\t 0 -- square error (L2-norm)\n"
+"\t 0 -- squared error (L2-norm)\n"
 "\t 1 -- absolute error (L1-norm)\n"
 "\t 2 -- generalized KL-divergence\n"
 "  for binary matrix factorization\n"
@@ -320,6 +320,8 @@ int main(int argc, char **argv)
 
         mf_int status = mf_save_model(model, option.model_path.c_str());
 
+        mf_destroy_model(&model);
+
         if(status != 0)
         {
             cout << "cannot save model to " << option.model_path << endl;
@@ -329,12 +331,9 @@ int main(int argc, char **argv)
                 delete[] tr.R;
                 delete[] va.R;
             }
-            mf_destroy_model(&model);
 
             return 1;
         }
-
-        mf_destroy_model(&model);
     }
 
     if(!option.on_disk)

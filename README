@@ -107,7 +107,7 @@ Command Line Usage
     options:
     -f  <loss>: specify loss function (default 0)
       for real-valued matrix factorization
-         0 -- square error (L2-norm)
+         0 -- squared error (L2-norm)
          1 -- absolute error (L1-norm)
          2 -- generalized KL-divergence (--nmf is required)
       for binary matrix factorization

@@ -11,7 +11,6 @@ namespace mf
 {
 #endif
 
-// Changing the following typedef is not allowed in this version.
 typedef float mf_float;
 typedef double mf_double;
 typedef int mf_int;
