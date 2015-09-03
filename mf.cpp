@@ -42,6 +42,10 @@ namespace // unnamed namespace
 mf_int const kALIGNByte = 32;
 mf_int const kALIGN = kALIGNByte/sizeof(mf_float);
 
+//--------------------------------------
+//---------Scheduler of Blocks----------
+//--------------------------------------
+
 class Scheduler
 {
 public:
@@ -307,6 +311,10 @@ bool Scheduler::is_terminated()
     return terminated;
 }
 
+//--------------------------------------
+//------------Block of matrix-----------
+//--------------------------------------
+
 class BlockBase
 {
 public:
@@ -322,7 +330,8 @@ class Block : public BlockBase
 {
 public:
     Block() : first(nullptr), last(nullptr), current(nullptr) {};
-    Block(mf_node *first_, mf_node *last_) : first(first_), last(last_), current(nullptr) {};
+    Block(mf_node *first_, mf_node *last_)
+        : first(first_), last(last_), current(nullptr) {};
     bool move_next() { return ++current != last; }
     mf_node* get_current() { return current; }
     void tie_to(mf_node *first_, mf_node *last_);
@@ -395,6 +404,10 @@ struct sort_node_by_q
         return tie(lhs.v, lhs.u) < tie(rhs.v, rhs.u);
     }
 };
+
+//--------------------------------------
+//-------------Miscellaneous------------
+//--------------------------------------
 
 class Utility
 {
@@ -740,7 +753,7 @@ string Utility::get_error_legend()
             return string("mae");
             break;
         case P_KL_MFR:
-            return string("kl");
+            return string("gkl");
             break;
         case P_LR_MFC:
             return string("logloss");
@@ -1098,6 +1111,10 @@ mf_problem* Utility::copy_problem(mf_problem const *prob, bool copy_data)
 
     return new_prob;
 }
+
+//--------------------------------------
+//-----The base class of all solvers----
+//--------------------------------------
 
 class SolverBase
 {
@@ -3160,12 +3177,16 @@ bool check_parameter(mf_parameter param)
     return true;
 }
 
+//--------------------------------------
+//-----Classes for cross validation-----
+//--------------------------------------
+
 class CrossValidatorBase
 {
 public:
     CrossValidatorBase(mf_parameter param_, mf_int nr_folds_);
     mf_double do_cross_validation();
-    virtual mf_double do_cv1(vector<mf_int> &hiden_blocks) { return 0; };
+    virtual mf_double do_cv1(vector<mf_int> &hidden_blocks) { return 0; };
 protected:
     mf_parameter param;
     mf_int nr_bins;
@@ -3207,10 +3228,10 @@ mf_double CrossValidatorBase::do_cross_validation()
     {
         mf_int begin = fold*nr_blocks_per_fold;
         mf_int end = min((fold+1)*nr_blocks_per_fold, nr_bins*nr_bins);
-        vector<mf_int> hiden_blocks(cv_blocks.begin()+begin,
+        vector<mf_int> hidden_blocks(cv_blocks.begin()+begin,
                                     cv_blocks.begin()+end);
 
-        mf_double err = do_cv1(hiden_blocks);
+        mf_double err = do_cv1(hidden_blocks);
         cv_error += err;
 
         if(!quiet)
@@ -3245,15 +3266,15 @@ public:
     CrossValidator(
         mf_parameter param_, mf_int nr_folds_, mf_problem const *prob_)
         : CrossValidatorBase(param_, nr_folds_), prob(prob_) {};
-    mf_double do_cv1(vector<mf_int> &hiden_blocks);
+    mf_double do_cv1(vector<mf_int> &hidden_blocks);
 private:
     mf_problem const *prob;
 };
 
-mf_double CrossValidator::do_cv1(vector<mf_int> &hiden_blocks)
+mf_double CrossValidator::do_cv1(vector<mf_int> &hidden_blocks)
 {
     mf_double err = 0;
-    fpsg(prob, nullptr, param, hiden_blocks, &err);
+    fpsg(prob, nullptr, param, hidden_blocks, &err);
     return err;
 }
 
@@ -3263,15 +3284,15 @@ public:
     CrossValidatorOnDisk(
         mf_parameter param_, mf_int nr_folds_, string data_path_)
         : CrossValidatorBase(param_, nr_folds_), data_path(data_path_) {};
-    mf_double do_cv1(vector<mf_int> &hiden_blocks);
+    mf_double do_cv1(vector<mf_int> &hidden_blocks);
 private:
     string data_path;
 };
 
-mf_double CrossValidatorOnDisk::do_cv1(vector<mf_int> &hiden_blocks)
+mf_double CrossValidatorOnDisk::do_cv1(vector<mf_int> &hidden_blocks)
 {
     mf_double err = 0;
-    fpsg_on_disk(data_path, string(), param, hiden_blocks, &err);
+    fpsg_on_disk(data_path, string(), param, hidden_blocks, &err);
     return err;
 }
 

@@ -1,6 +1,6 @@
 CXX = g++
 CXXFLAGS = -Wall -O3 -pthread -std=c++0x -march=native
-SHVER = 1
+SHVER = 2
 
 # run `make clean all' if you change the following flags.
 
