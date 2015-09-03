@@ -389,6 +389,10 @@ void BlockOnDisk::reload()
     current = -1;
 }
 
+//--------------------------------------
+//-------------Miscellaneous------------
+//--------------------------------------
+
 struct sort_node_by_p
 {
     bool operator() (mf_node const &lhs, mf_node const &rhs)
@@ -404,10 +408,6 @@ struct sort_node_by_q
         return tie(lhs.v, lhs.u) < tie(rhs.v, rhs.u);
     }
 };
-
-//--------------------------------------
-//-------------Miscellaneous------------
-//--------------------------------------
 
 class Utility
 {
@@ -3186,7 +3186,7 @@ class CrossValidatorBase
 public:
     CrossValidatorBase(mf_parameter param_, mf_int nr_folds_);
     mf_double do_cross_validation();
-    virtual mf_double do_cv1(vector<mf_int> &hidden_blocks) { return 0; };
+    virtual mf_double do_cv1(vector<mf_int> &hidden_blocks) = 0;
 protected:
     mf_parameter param;
     mf_int nr_bins;
@@ -3369,7 +3369,7 @@ mf_double mf_cross_validation(
     mf_parameter param)
 {
     if(!check_parameter(param))
-        throw invalid_argument("wrong parameters");
+        return 0;
 
     CrossValidator validator(param, nr_folds, prob);
 
@@ -3382,7 +3382,7 @@ mf_double mf_cross_validation_on_disk(
     mf_parameter param)
 {
     if(!check_parameter(param))
-        throw invalid_argument("wrong parameters");
+        return 0;
 
     CrossValidatorOnDisk validator(param, nr_folds, string(prob));
 
