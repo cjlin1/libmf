@@ -2789,6 +2789,11 @@ void fpsg_core(
     auto flush_zero_mode = _MM_GET_FLUSH_ZERO_MODE();
     _MM_SET_FLUSH_ZERO_MODE(_MM_FLUSH_ZERO_ON);
 #endif
+    if(tr->nnz == 0)
+    {
+        cout << "warning: train on an empty training set" << endl;
+        return;
+    }
 
     if(param.fun == P_L2_MFR ||
        param.fun == P_L1_MFR ||
@@ -2933,7 +2938,6 @@ void fpsg_core(
 #if defined USESSE || defined USEAVX
     _MM_SET_FLUSH_ZERO_MODE(flush_zero_mode);
 #endif
-
 }
 
 shared_ptr<mf_model> fpsg(
