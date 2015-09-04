@@ -16,7 +16,7 @@ echo "--------------------------------"
 # In-memory training with holdout valudation
 $train -f 0 -l2 0.05 -k 100 -t 10 -p real_matrix.te.txt real_matrix.tr.txt rvmf_model.txt
 # Do prediction and show MAE
-$predict -e 1 real_matrix.te.txt real_model.txt rvmf_output.txt
+$predict -e 1 real_matrix.te.txt rvmf_model.txt rvmf_output.txt
 
 ##########################################################################
 # Binary matrix factorization (BMF)
