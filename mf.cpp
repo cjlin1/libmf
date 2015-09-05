@@ -14,7 +14,6 @@
 #include <string>
 #include <memory>
 #include <set>
-#include <limits>
 
 #include "mf.h"
 
@@ -40,6 +39,28 @@ namespace // unnamed namespace
 
 mf_int const kALIGNByte = 32;
 mf_int const kALIGN = kALIGNByte/sizeof(mf_float);
+
+vector<string> tokenize(string str)
+{
+    vector<string> tokens;
+
+    if(str.empty())
+        return tokens;
+
+    basic_string<char>::size_type begin = 0, end = 0;
+    while((end = str.find_first_of(" ", begin)) != string::npos)
+    {
+        string token = str.substr(begin, end-begin);
+        if(token.size() != 0)
+            tokens.push_back(token);
+        begin = end + 1;
+    }
+    string tail = str.substr(begin);
+    if(tail.size() != 0)
+        tokens.push_back(tail);
+
+    return tokens;
+}
 
 class Scheduler
 {
@@ -84,8 +105,8 @@ Scheduler::Scheduler(mf_int nr_bins, mf_int nr_threads, vector<mf_int> cv_blocks
       counts(nr_bins*nr_bins, 0), 
       busy_p_blocks(nr_bins, 0), 
       busy_q_blocks(nr_bins, 0), 
-      block_losses(nr_bins*nr_bins, 0),
       cv_blocks(cv_blocks.begin(), cv_blocks.end()),
+      block_losses(nr_bins*nr_bins, 0),
       distribution(0.0, 1.0) 
 {
     for(mf_int i = 0; i < nr_bins*nr_bins; i++)
@@ -501,7 +522,7 @@ public:
     Utility (mf_int n);
     void shuffle_problem(mf_problem &prob, vector<mf_int> &p_map, vector<mf_int> &q_map);
     vector<mf_node*> grid_problem(mf_problem &prob, mf_int nr_bins);
-    void calc_stats(mf_problem &prob, mf_float &avg, mf_float &std_dev);
+    mf_float calc_std_dev(mf_problem &prob);
     void scale_problem(mf_problem &prob, mf_float scale);
     mf_float inner_product(mf_float *p, mf_float *q, mf_int k);
     mf_double calc_reg(mf_model &model, vector<mf_int> &omega_p, vector<mf_int> &omega_q);
@@ -525,24 +546,25 @@ Utility::Utility(mf_int n):
     nr_threads(n)
 { }
 
-void Utility::calc_stats(mf_problem &prob, mf_float &avg, mf_float &std_dev)
+mf_float Utility::calc_std_dev(mf_problem &prob)
 {
-    mf_double ex = 0;
-    mf_double sq_ex = 0;
+    mf_double avg = 0;
 #if defined USEOMP
-#pragma omp parallel for num_threads(nr_threads) schedule(static) reduction(+:ex, sq_ex)
+#pragma omp parallel for num_threads(nr_threads) schedule(static) reduction(+: avg)
 #endif
     for(mf_long i = 0; i < prob.nnz; i++)
-    {
-        ex += prob.R[i].r;
-        sq_ex += prob.R[i].r*prob.R[i].r;
-    }
+        avg += prob.R[i].r;
+    avg /= prob.nnz;
 
-    ex /= prob.nnz;
-    sq_ex /= prob.nnz;
+    mf_double std_dev = 0;
+#if defined USEOMP
+#pragma omp parallel for num_threads(nr_threads) schedule(static) reduction(+: std_dev)
+#endif
+    for(mf_long i = 0; i < prob.nnz; i++)
+        std_dev += (prob.R[i].r-avg)*(prob.R[i].r-avg);
+    std_dev = sqrt(std_dev/prob.nnz);
 
-    avg = ex;
-    std_dev = sqrt(sq_ex-ex*ex);
+    return (mf_float)std_dev;
 }
 
 void Utility::scale_problem(mf_problem &prob, mf_float scale)
@@ -558,7 +580,7 @@ void Utility::scale_model(mf_model &model, mf_float scale)
 {
     mf_int k = model.k;
 
-    auto scale1 = [&] (mf_float *ptr, mf_int size, mf_float factor_scale)
+    auto scale1 = [&] (mf_float *ptr, mf_int size)
     {
 #if defined USEOMP
 #pragma omp parallel for num_threads(nr_threads) schedule(static)
@@ -567,13 +589,12 @@ void Utility::scale_model(mf_model &model, mf_float scale)
         {
             mf_float *ptr1 = ptr+(mf_long)i*model.k;
             for(mf_int d = 0; d < k; d++)
-                ptr1[d] *= factor_scale;
+                ptr1[d] *= scale;
         }
     };
 
-    model.b *= scale;
-    scale1(model.P, model.m, sqrt(scale));
-    scale1(model.Q, model.n, sqrt(scale));
+    scale1(model.P, model.m);
+    scale1(model.Q, model.n);
 }
 
 mf_float Utility::inner_product(mf_float *p, mf_float *q, mf_int k)
@@ -614,8 +635,6 @@ mf_double Utility::calc_reg(mf_model &model, vector<mf_int> &omega_p, vector<mf_
 #endif
         for(mf_int i = 0; i < size; i++)
         {
-            if(omega[i] <= 0)
-                continue;
             mf_float *ptr1 = ptr+(mf_long)i*model.k;
             reg += omega[i]*inner_product(ptr1, ptr1, model.k);
         }
@@ -629,8 +648,6 @@ mf_double Utility::calc_reg(mf_model &model, vector<mf_int> &omega_p, vector<mf_
 
 mf_double Utility::calc_loss(mf_node *R, mf_long size, mf_model const &model)
 {
-    if(size <= 0)
-        return 0;
     mf_double loss = 0;
 #if defined USEOMP
 #pragma omp parallel for num_threads(nr_threads) schedule(static) reduction(+:loss)
@@ -665,9 +682,9 @@ void Utility::shuffle_problem(
     for(mf_long i = 0; i < prob.nnz; i++)
     {
         mf_node &N = prob.R[i];
-        if(N.u < (mf_long)p_map.size())
+        if(N.u < p_map.size())
             N.u = p_map[N.u];
-        if(N.v < (mf_long)q_map.size())
+        if(N.v < q_map.size())
             N.v = q_map[N.v];
     }
 }
@@ -767,7 +784,6 @@ mf_model* Utility::init_model(shared_ptr<mf_problem> prob, mf_int k_real, mf_int
     model->m = prob->m;
     model->n = prob->n;
     model->k = k_aligned;
-    model->b = 0;
     model->P = nullptr;
     model->Q = nullptr;
 
@@ -789,7 +805,7 @@ mf_model* Utility::init_model(shared_ptr<mf_problem> prob, mf_int k_real, mf_int
     set<mf_int> u_set;
     set<mf_int> v_set;
 
-    for(mf_long i = 0; i < prob->nnz; i++)
+    for (mf_int i=0; i<prob->nnz; i++)
     {
         u_set.insert(prob->R[i].u);
         v_set.insert(prob->R[i].v);
@@ -798,13 +814,7 @@ mf_model* Utility::init_model(shared_ptr<mf_problem> prob, mf_int k_real, mf_int
     auto init1 = [&](mf_float *start_ptr, mf_int count, set<mf_int> nz_set)
     {
         memset(start_ptr, 0, sizeof(mf_float)*count*model->k);
-        for(mf_long i = 0; i < count; i++)
-        {
-            mf_float *ptr = start_ptr+i*model->k;
-            for(mf_long d = 0; d < k_real; d++, ptr++)
-                *ptr = numeric_limits<mf_float>::quiet_NaN();
-        }
-        for(auto it = nz_set.begin(); it != nz_set.end(); it++)
+        for (auto it = nz_set.begin(); it != nz_set.end(); it++)
         {
             mf_float * ptr = start_ptr + (mf_long)(*it)*model->k;
             for(mf_long d = 0; d < k_real; d++, ptr++)
@@ -831,7 +841,7 @@ vector<mf_int> Utility::gen_random_map(mf_int size)
 vector<mf_int> Utility::gen_inv_map(vector<mf_int> &map)
 {
     vector<mf_int> inv_map(map.size());
-    for(mf_int i = 0; i < (mf_long)map.size(); i++)
+    for(mf_int i = 0; i < map.size(); i++)
       inv_map[map[i]] = i;
     return inv_map;
 }
@@ -932,6 +942,7 @@ shared_ptr<mf_model> fpsg(
     mf_double *cv_loss=nullptr, 
     mf_long *cv_count=nullptr)
 {
+    param.nr_bins = max(param.nr_bins, 2*param.nr_threads);
     Utility util(param.nr_threads);
 
     shared_ptr<mf_problem> tr, va;
@@ -968,15 +979,11 @@ shared_ptr<mf_model> fpsg(
     shared_ptr<mf_model> model(Utility::init_model(tr, param.k, k_aligned), 
                                [] (mf_model *ptr) { mf_destroy_model(&ptr); });
 
-    mf_float avg = 0;
-    mf_float std_dev = 0;
-    util.calc_stats(*tr, avg, std_dev);
-    std_dev = max((mf_float)1e-4, std_dev);
+    mf_float std_dev = max((mf_float)1e-4, util.calc_std_dev(*tr));
 
     util.scale_problem(*tr, 1.0/std_dev);
     util.scale_problem(*va, 1.0/std_dev);
     param.lambda /= std_dev;
-    model->b = avg/std_dev;
 
     Scheduler sched(param.nr_bins, param.nr_threads, cv_blocks);
 
@@ -1088,7 +1095,7 @@ shared_ptr<mf_model> fpsg(
         util.shuffle_problem(*va, inv_p_map, inv_q_map);
     }
 
-    util.scale_model(*model, std_dev);
+    util.scale_model(*model, sqrt(std_dev));
     Utility::shrink_model(*model, param.k);
     Utility::shuffle_model(*model, inv_p_map, inv_q_map);
 
@@ -1102,8 +1109,6 @@ mf_model* mf_train_with_validation(
     mf_problem const *va, 
     mf_parameter param)
 {
-    param.nr_bins = max(param.nr_bins, 2*param.nr_threads);
-
     shared_ptr<mf_model> model = fpsg(tr, va, param);
 
     mf_model *model_ret = new mf_model;
@@ -1111,7 +1116,6 @@ mf_model* mf_train_with_validation(
     model_ret->m = model->m;
     model_ret->n = model->n;
     model_ret->k = model->k;
-    model_ret->b = model->b;
 
     model_ret->P = model->P;
     model->P = nullptr;
@@ -1132,7 +1136,6 @@ mf_float mf_cross_validation(
     mf_int nr_folds, 
     mf_parameter param)
 {
-    param.nr_bins = max(param.nr_bins, 2*param.nr_threads);
     bool quiet = param.quiet;
     param.quiet = true;
 
@@ -1155,11 +1158,12 @@ mf_float mf_cross_validation(
     }
 
     mf_double loss = 0;
+    mf_int idx = 0;
     mf_long count = 0;
     for(mf_int fold = 0; fold < nr_folds; fold++)
     {
         mf_int begin = fold*nr_blocks_per_fold;
-        mf_int end = min((fold+1)*nr_blocks_per_fold, nr_bins*nr_bins);
+        mf_int end= min((fold+1)*nr_blocks_per_fold, nr_bins*nr_bins);
 
         vector<mf_int> cv_blocks1(cv_blocks.begin()+begin, 
                                   cv_blocks.begin()+end);
@@ -1169,9 +1173,7 @@ mf_float mf_cross_validation(
 
         fpsg(prob, nullptr, param, cv_blocks1, &loss1, &count1);
 
-        mf_float rmse1 = 0;
-        if(count1 > 0)
-            rmse1 = sqrt(loss1/count1);
+        mf_float rmse1 = sqrt(loss1/count1);
 
         if(!quiet)
         {
@@ -1185,10 +1187,7 @@ mf_float mf_cross_validation(
         loss += loss1;
         count += count1;
     }
-
-    mf_float rmse = 0;
-    if(count > 0)
-        rmse = sqrt(loss/count);
+    mf_float rmse = sqrt(loss/count);
 
     if(!quiet)
     {
@@ -1215,7 +1214,6 @@ mf_int mf_save_model(mf_model const *model, char const *path)
     f << "m " << model->m << endl;
     f << "n " << model->n << endl;
     f << "k " << model->k << endl;
-    f << "b " << model->b << endl;
 
     auto write = [&] (mf_float *ptr, mf_int size, char prefix)
     {
@@ -1223,18 +1221,8 @@ mf_int mf_save_model(mf_model const *model, char const *path)
         {
             mf_float *ptr1 = ptr + (mf_long)i*model->k;
             f << prefix << i << " ";
-            if(isnan(ptr1[0]))
-            {
-                f << "F ";
-                for(mf_int d = 0; d < model->k; d++)
-                    f << 0 << " ";
-            }
-            else
-            {
-                f << "T ";
-                for(mf_int d = 0; d < model->k; d++)
-                    f << ptr1[d] << " ";
-            }
+            for(mf_int d = 0; d < model->k; d++)
+                f << ptr1[d] << " ";
             f << endl;
         }
     };
@@ -1257,7 +1245,7 @@ mf_model* mf_load_model(char const *path)
     model->P = nullptr;
     model->Q = nullptr;
 
-    f >> dummy >> model->m >> dummy >> model->n >> dummy >> model->k >> dummy >> model->b;
+    f >> dummy >> model->m >> dummy >> model->n >> dummy >> model->k;
 
     try
     {
@@ -1275,16 +1263,9 @@ mf_model* mf_load_model(char const *path)
         for(mf_int i = 0; i < size; i++)
         {
             mf_float *ptr1 = ptr + (mf_long)i*model->k;
-            f >> dummy >> dummy;
-            if(dummy.compare("F") == 0) // nan vector has a flag "F"
-                for(mf_int d = 0; d < model->k; d++)
-                {
-                    f >> dummy; 
-                    ptr1[d] = numeric_limits<mf_float>::quiet_NaN();
-                }
-            else
-                for(mf_int d = 0; d < model->k; d++)
-                    f >> ptr1[d];
+            f >> dummy;
+            for(mf_int d = 0; d < model->k; d++)
+                f >> ptr1[d];
         }
     };
 
@@ -1312,17 +1293,12 @@ void mf_destroy_model(mf_model **model)
 mf_float mf_predict(mf_model const *model, mf_int u, mf_int v)
 {
     if(u < 0 || u >= model->m || v < 0 || v >= model->n)
-        return model->b;
+        return 0.0f;
 
     mf_float *p = model->P+(mf_long)u*model->k;
     mf_float *q = model->Q+(mf_long)v*model->k;
 
-    mf_float z = std::inner_product(p, p+model->k, q, (mf_float)0);
-
-    if(isnan(z))
-        return model->b;
-    else
-        return z;
+    return std::inner_product(p, p+model->k, q, (mf_float)0);
 }
 
 mf_parameter mf_get_default_param()

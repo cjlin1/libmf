@@ -8,7 +8,6 @@ Table of Contents
 
 - Installation
 - Data Format
-- Model Format
 - Command Line Usage
 - Examples
 - Library Usage
@@ -31,7 +30,6 @@ Installation
   binaries are available in the directory `windows.'
 
 
-
 Data Format
 ===========
 
@@ -42,44 +40,6 @@ The data format is:
 See an example `bigdata.tr.txt.'
 
 Note: If the values in the test set are unknown, please write dummy zeros.
-
-
-
-Model Format
-============
-
-    LIBMF factorizes a training matrix `R' into a k-by-m matrix `P' and a
-    k-by-n matrix `Q' such that `R' is approximated by P'Q. After the training
-    process, the two factor matrices `P' and `Q' are stored into a model file.
-    The file starts with a header including the following parameters:
-
-        `m': the number of rows in the training matrix,
-        `n': the number of columns in the training matrix,
-        `k': the number of latent factors,
-        `b': the average of all elements in the training matrix.
-
-    From the 5th line, the columns of `P' and `Q' are stored line by line.
-    For each line, there are two leading tokens followed by the values of a
-    column.  The first token is the name of the stored column, and the second
-    word indicates the type of values. If the second word is `T', the column is
-    a real-valued vector. Otherwise, all values in the column are NaN. For
-    example, if
-
-        P = [1 NaN 2; 3 NaN 4; 5 NaN 6], Q = [-1, -2; -3, -4; -5; -6],
-
-    and the value `b' is 0.5, the content of the model file is:
-
-        ========================model file========================
-        m 3
-        n 2
-        k 3
-        b 0.5
-        p1 T 1 3 5
-        p2 F 0 0 0
-        p3 T 2 4 6
-        q1 T -1 -3 -5
-        q2 T -2 -4 -6
-        =========================================================
 
 
 
@@ -247,16 +207,15 @@ There are four public data structures in LIBMF.
         mf_int m;
         mf_int n;
         mf_int k;
-        mf_float b;
         mf_float *P;
         mf_float *Q;
     };
 
     `mf_model' is used to store models in LIBMF. `m' represents the number of
-    rows, `n' represents the number of columns, `k' represents the number of
-    latent factors, and `b' is the average value of all elements in the training
-    matrix. `P' is used to store a kxm matrix in column oriented format.  For
-    example, if `P' stores a 3x4 matrix, then the content of `P' is:
+    rows, `n' represents the number of columns, and `k' represents the number
+    of latent factors. `P' is used to store a kxm matrix in column oriented
+    format. For example, if `P' stores a 3x4 matrix, then the content of `P'
+    is:
         
         P11 P21 P31 P12 P22 P32 P13 P23 P33 P14 P24 P34
 
@@ -305,9 +264,7 @@ Functions available in LIBMF include:
 
 -   mf_float mf_predict(struct mf_model const *model, mf_int p_idx, mf_int q_idx);
 
-    Predict the value at the position (p_idx, q_idx). If `p_idx' or `q_idx' can not
-    be found in the training data, the function returns the average of all values
-    in the training matrix.
+    Predict the value at the position (p_idx, q_idx).
 
 
 
