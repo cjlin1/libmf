@@ -55,7 +55,7 @@ string train_help()
 "-v <fold>: set number of folds for cross validation\n"
 "--quiet: quiet mode (no outputs)\n"
 "--nmf: perform non-negative matrix factorization\n"
-"--disk: use disk to store blocks for training\n");
+"--disk: perform disk-level training (will generate a buffer file)\n");
 }
 
 bool is_numerical(char *str)

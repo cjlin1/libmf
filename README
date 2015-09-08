@@ -105,6 +105,12 @@ Command Line Usage
     usage: mf-train [options] training_set_file [model_file]
 
     options:
+    -l1 <lambda>,<lambda>: set L1-regularization parameters for P and Q.
+        (default 0) If only one value is specified, P and Q share the same
+        lambda.
+    -l2 <lambda>,<lambda>: set L2-regularization parameters for P and Q.
+        (default 0.1) If only one value is specified, P and Q share the same
+        lambda.
     -f  <loss>: specify loss function (default 0)
       for real-valued matrix factorization
          0 -- squared error (L2-norm)
@@ -117,11 +123,6 @@ Command Line Usage
       for one-class matrix factorization
         10 -- row-oriented pair-wise logarithmic loss
         11 -- column-oriented pair-wise logarithmic loss
-    -l1 <lambda>,<lambda>: set L1-regularization parameters for P and Q. If
-        only one value is specified, P and Q share the same lambda. (default 0)
-    -l2 <lambda>,<lambda>: set L2-regularization parameters for P and Q. If
-        only one value is specified, P and Q share the same lambda. (default
-        0.1)
     -k <dimensions>: set number of dimensions (default 8)
     -t <iter>: set number of iterations (default 20)
     -r <eta>: set initial learning rate (default 0.1)
@@ -290,14 +291,14 @@ There are four public data structures in LIBMF.
 
 -   struct mf_parameter
     {
-        mf_int f;
+        mf_int fun;
         mf_int k;
         mf_int nr_threads;
         mf_int nr_bins;
         mf_int nr_iters;
         mf_float lambda_p1;
-        mf_float lambda_q1;
         mf_float lambda_p2;
+        mf_float lambda_q1;
         mf_float lambda_q2;
         mf_float eta;
         bool do_nmf;
@@ -310,14 +311,14 @@ There are four public data structures in LIBMF.
 
     variable      meaning                                    default
     ================================================================
-    f             loss function                                    0
+    fun           loss function                                    0
     k             number of latent factors                         8
     nr_threads    number of threads used                          12
     nr_bins       number of bins                                  20
     nr_iters      number of iterations                            20
     lambda_p1     coefficient of L1-norm regularization on P       0
-    lambda_q1     coefficient of L1-norm regularization on Q       0
     lambda_p2     coefficient of L2-norm regularization on P     0.1
+    lambda_q1     coefficient of L1-norm regularization on Q       0
     lambda_q2     coefficient of L2-norm regularization on Q     0.1
     eta           learning rate                                  0.1
     do_nmf        perform non-negative MF (NMF)                false
@@ -351,7 +352,7 @@ There are four public data structures in LIBMF.
 
 -   struct mf_model
     {
-        mf_int f;
+        mf_int fun;
         mf_int m;
         mf_int n;
         mf_int k;
@@ -360,9 +361,9 @@ There are four public data structures in LIBMF.
         mf_float *Q;
     };
 
-    `mf_model' is used to store models learned by LIBMF. `f' indicates the loss
-    funcion of the sovled MF problem. `m' represents the number of rows, `n'
-    represents the number of columns, `k' represents the number of latent
+    `mf_model' is used to store models learned by LIBMF. `fun' indicates the
+    loss funcion of the sovled MF problem. `m' represents the number of rows,
+    `n' represents the number of columns, `k' represents the number of latent
     factors, and `b' is the average of all elements in the training matrix. `P'
     is used to store a kxm matrix in column oriented format. For example, if
     `P' stores a 3x4 matrix, then the content of `P' is:
@@ -569,9 +570,14 @@ References
 Stochastic Gradient Method for Matrix Factorization in Shared Memory Systems.
 ACM TIST, 2015. (www.csie.ntu.edu.tw/~cjlin/papers/libmf/libmf_journal.pdf)
 
-[2] W.-S. Chin, Y. Zhuang, Y.-C. Juan, and C.-J. Lin. A learning-rate schedule
-for stochastic gradient methods to matrix factorization. PAKDD, 2015.
+[2] W.-S. Chin, Y. Zhuang, Y.-C. Juan, and C.-J. Lin. A Learning-rate Schedule
+for Stochastic Gradient Methods to Matrix Factorization. PAKDD, 2015.
+(www.csie.ntu.edu.tw/~cjlin/papers/libmf/mf_adaptive_pakdd.pdf)
 
+[3] W.-S. Chin, B.-W. Yuan, M.-Y. Yang, Y. Zhuang, Y.-C. Juan, and C.-J. Lin.
+LIBMF: A Library for Parallel Matrix Factorization in Shared-memory Systems.
+Technical report, 2015.
+(www.csie.ntu.edu.tw/~cjlin/papers/libmf/libmf_open_source.pdf)
 
 For any questions and comments, please email:
 

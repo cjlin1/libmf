@@ -2835,6 +2835,7 @@ void fpsg_core(
     vector<mf_float> PG(model->m*2, 1), QG(model->n*2, 1);
 
     vector<thread> threads;
+    threads.reserve(param.nr_threads);
     for(mf_int i = 0; i < param.nr_threads; i++)
     {
         shared_ptr<SolverBase> solver = SolverFactory::get_solver(

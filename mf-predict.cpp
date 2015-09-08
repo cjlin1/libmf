@@ -26,15 +26,15 @@ string predict_help()
 "\n"
 "options:\n"
 "-e <eval>: specify the evaluation criterion (default 0)\n"
-"\t 0 -- Root mean square error\n"
-"\t 1 -- Mean absolute error\n"
-"\t 2 -- Generalized KL-divergence\n"
-"\t 5 -- Logistic error\n"
-"\t 6 -- Accuracy\n"
-"\t10 -- Row-wise Mean percentile rank\n"
-"\t11 -- Column-wise Mean percentile rank\n"
-"\t12 -- Row-wise Area under ROC curve\n"
-"\t13 -- Column-wise Area under ROC curve\n");
+"\t 0 -- root mean square error\n"
+"\t 1 -- mean absolute error\n"
+"\t 2 -- generalized KL-divergence\n"
+"\t 5 -- logarithmic error\n"
+"\t 6 -- accuracy\n"
+"\t10 -- row-wise mean percentile rank\n"
+"\t11 -- column-wise mean percentile rank\n"
+"\t12 -- row-wise area under the curve\n"
+"\t13 -- column-wise area under the curve\n");
 }
 
 Option parse_option(int argc, char **argv)
