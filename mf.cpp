@@ -2834,14 +2834,15 @@ void fpsg_core(
     bool slow_only = param.lambda_p1 == 0 && param.lambda_q1 == 0? true: false;
     vector<mf_float> PG(model->m*2, 1), QG(model->n*2, 1);
 
+    vector<shared_ptr<SolverBase>> solvers(param.nr_threads);
     vector<thread> threads;
     threads.reserve(param.nr_threads);
     for(mf_int i = 0; i < param.nr_threads; i++)
     {
-        shared_ptr<SolverBase> solver = SolverFactory::get_solver(
-            sched, block_ptrs, PG.data(), QG.data(), *model,
-            param, slow_only);
-        threads.emplace_back(&SolverBase::run, solver);
+        solvers[i] = SolverFactory::get_solver(sched, block_ptrs,
+                                               PG.data(), QG.data(),
+                                               *model, param, slow_only);
+        threads.emplace_back(&SolverBase::run, solvers[i].get());
     }
 
     for(mf_int iter = 0; iter < param.nr_iters; iter++)

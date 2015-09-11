@@ -78,6 +78,10 @@ struct mf_model* mf_train(
     struct mf_problem const *prob,
     struct mf_parameter param);
 
+struct mf_model* mf_train_on_disk(
+    char const *tr_path,
+    struct mf_parameter param);
+
 struct mf_model* mf_train_with_validation(
     struct mf_problem const *tr,
     struct mf_problem const *va,
