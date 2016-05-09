@@ -3560,8 +3560,8 @@ mf_float mf_predict(mf_model const *model, mf_int u, mf_int v)
     if(isnan(z))
         z = model->b;
 
-    if(model->fun == P_L2_MFC &&
-       model->fun == P_L1_MFC &&
+    if(model->fun == P_L2_MFC ||
+       model->fun == P_L1_MFC ||
        model->fun == P_LR_MFC)
         z = z > 0.0f? 1.0f: -1.0f;
 
