@@ -46,9 +46,12 @@ string train_help()
 "  for one-class matrix factorization\n"
 "\t10 -- row-oriented pairwise logarithmic loss\n"
 "\t11 -- column-oriented pairwise logarithmic loss\n"
+"\t12 -- squared error (L2-norm)\n"
 "-k <dimensions>: set number of dimensions (default 8)\n"
 "-t <iter>: set number of iterations (default 20)\n"
 "-r <eta>: set learning rate (default 0.1)\n"
+"-a <alpha>: set weight of negative entries (default 1)\n"
+"-c <c>: set value of negative entries (default 0.0001)\n"
 "-s <threads>: set number of threads (default 12)\n"
 "-n <bins>: set number of bins (may be adjusted by LIBMF)\n"
 "-p <path>: set path to the validation set\n"
@@ -168,6 +171,35 @@ Option parse_option(int argc, char **argv)
             if(!is_numerical(argv[i]))
                 throw invalid_argument("-s should be followed by a number");
             option.param.nr_threads = atoi(argv[i]);
+        }
+        else if(args[i].compare("-a") == 0)
+        {
+            if((i+1) >= argc)
+                throw invalid_argument("need to specify negative weight\
+                                        after -a");
+            i++;
+
+            if(!is_numerical(argv[i]))
+                throw invalid_argument("-a should be followed by a number");
+            option.param.alpha = atof(argv[i]);
+        }
+        else if(args[i].compare("-c") == 0)
+        {
+            if((i+1) >= argc)
+                throw invalid_argument("need to specify negative rating\
+                                        after -c");
+            i++;
+
+            if(!is_numerical(argv[i]))
+                throw invalid_argument("-c should be followed by a number");
+
+            if (argv[i][0] == '-')
+                // Negative number starts with - but atof only recognize numbers.
+                // Thus, we pass all but the first symbol to atof.
+                option.param.c = -atof(argv[i] + 1);
+            else
+                // Non-negative numbers such as 0 and 0.5 can be handled by atof.
+                option.param.c = atof(argv[i]);
         }
         else if(args[i].compare("-p") == 0)
         {
