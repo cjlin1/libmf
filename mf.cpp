@@ -935,16 +935,9 @@ void Utility::grid_shuffle_scale_problem_on_disk(
 
 mf_float* Utility::malloc_aligned_float(mf_long size)
 {
-    void *ptr;
-#ifdef _WIN32
-    ptr = _aligned_malloc(size*sizeof(mf_float), kALIGNByte);
+    void *ptr = aligned_alloc(kALIGNByte, size*sizeof(mf_float));
     if(ptr == nullptr)
         throw bad_alloc();
-#else
-    int status = posix_memalign(&ptr, kALIGNByte, size*sizeof(mf_float));
-    if(status != 0)
-        throw bad_alloc();
-#endif
 
     return (mf_float*)ptr;
 }
@@ -3536,13 +3529,8 @@ void mf_destroy_model(mf_model **model)
 {
     if(model == nullptr || *model == nullptr)
         return;
-#ifdef _WIN32
-    _aligned_free((*model)->P);
-    _aligned_free((*model)->Q);
-#else
     free((*model)->P);
     free((*model)->Q);
-#endif
     delete *model;
     *model = nullptr;
 }
