@@ -444,11 +444,14 @@ public:
     static vector<mf_int> gen_random_map(mf_int size);
     static mf_float* malloc_aligned_float(mf_long size);
     // Initialization function for stochastic gradient method.
+    // Factor matrices P and Q are both randomly initialized.
     static mf_model* init_model(mf_int loss, mf_int m, mf_int n,
                                 mf_int k, mf_float avg,
                                 vector<mf_int> &omega_p,
                                 vector<mf_int> &omega_q);
     // Initialization function for one-class CD.
+    // It does zero-initialization on factor matrix P and random initialization
+    // on factor matrix Q.
     static mf_model* init_model(mf_int m, mf_int n, mf_int k);
     static mf_float inner_product(mf_float *p, mf_float *q, mf_int k);
     static vector<mf_int> gen_inv_map(vector<mf_int> &map);
@@ -456,7 +459,7 @@ public:
     static void shuffle_model(mf_model &model,
                               vector<mf_int> &p_map,
                               vector<mf_int> &q_map);
-
+    mf_int get_thread_number() const { return nr_threads; };
 private:
     mf_int fun;
     mf_int nr_threads;
@@ -1039,12 +1042,18 @@ mf_model* Utility::init_model(mf_int m, mf_int n, mf_int k)
     // since the approximated rating matrix is PQ^T.
 
     // Initialize P with zeros
+#if defined USEOMP
+#pragma omp parallel for num_threads(util.get_thread_number()) schedule(static)
+#endif
     for (mf_long i = 0; i < k * m; ++i)
         model->P[i] = 0.0;
 
     // Initialize Q with random numbers
     default_random_engine generator;
     uniform_real_distribution<mf_float> distribution(0.0, 1.0);
+#if defined USEOMP
+#pragma omp parallel for num_threads(util.get_thread_number()) schedule(static)
+#endif
     for (mf_long i = 0; i < k * n; ++i)
         model->Q[i] = distribution(generator);
 
@@ -3177,7 +3186,8 @@ catch(exception const &e)
 //  counterparts of P and Q in stochastic gradient method. Let R denoates 
 //  the training matrix. For stochastic gradient method, we have R ~ P^TQ.
 //  For coordinate descent method, we have R ~ PQ^T.
-void calc_ccd_one_class_obj(mf_float alpha, mf_float c,
+void calc_ccd_one_class_obj(const mf_int nr_threads,
+        const mf_float alpha, const mf_float c,
         const mf_int m, const mf_int n, const mf_int d,
         const mf_float lambda_p2, const mf_float lambda_q2,
         const mf_float *P, const mf_float *Q,
@@ -3194,12 +3204,18 @@ void calc_ccd_one_class_obj(mf_float alpha, mf_float c,
     // Compute square of Frobenius norm on P and sum of all rows in P.
     for (mf_int k = 0; k < d; ++k)
     {
+        // Declare a temporal buffer of all_p_sum[k] for using OpenMP.
+        mf_double all_p_sum_k = 0.0;
+#if defined USEOMP
+#pragma omp parallel for num_threads(nr_threads) schedule(static) reduction(+:p_square_norm,all_p_sum_k)
+#endif
         for (mf_int u = 0; u < m; ++u)
         {
             const mf_float &p_ku = P[u + k * m];
             p_square_norm += p_ku * p_ku;
-            all_p_sum[k] += p_ku;
+            all_p_sum_k += p_ku;
         }
+        all_p_sum[k] = all_p_sum_k;
     }
 
     // Declare regularization term of Q
@@ -3209,12 +3225,18 @@ void calc_ccd_one_class_obj(mf_float alpha, mf_float c,
     // Compute square of Frobenius norm on Q and sum of all elements in Q
     for (mf_int k = 0; k < d; ++k)
     {
+        // Declare a temporal buffer of all_p_sum[k] for using OpenMP.
+        mf_double all_q_sum_k = 0.0;
+#if defined USEOMP
+#pragma omp parallel for num_threads(nr_threads) schedule(static) reduction(+:q_square_norm,all_q_sum_k)
+#endif
         for (mf_int v = 0; v < n; ++v)
         {
             const mf_float &q_kv = Q[v + k * n];
             q_square_norm += q_kv * q_kv;
-            all_q_sum[k] += q_kv;
+            all_q_sum_k += q_kv;
         }
+        all_q_sum[k] = all_q_sum_k;
     }
 
     // PTP = P^T * P, where P^T is the transpose of P. Note that P is a m-by-d
@@ -3228,10 +3250,23 @@ void calc_ccd_one_class_obj(mf_float alpha, mf_float c,
     {
         for (mf_int k2 = 0; k2 < d; ++k2)
         {
+            // Inner product of the k1 and k2 columns in P, a m-by-d matrix.
+            mf_double p_k1_p_k2_inner_product = 0.0;
+#if defined USEOMP
+#pragma omp parallel for num_threads(nr_threads) schedule(static) reduction(+:p_k1_p_k2_inner_product)
+#endif
             for (mf_int u = 0; u < m; ++u)
-                PTP[k1 * d + k2] += P[u + k1 * m] * P[u + k2 * m];
+                p_k1_p_k2_inner_product += P[u + k1 * m] * P[u + k2 * m];
+            PTP[k1 * d + k2] = p_k1_p_k2_inner_product;
+
+            // Inner product of the k1 and k2 columns in Q, a n-by-d matrix.
+            mf_double q_k1_q_k2_inner_product = 0.0;
+#if defined USEOMP
+#pragma omp parallel for num_threads(nr_threads) schedule(static) reduction(+:q_k1_q_k2_inner_product)
+#endif
             for (mf_int v = 0; v < n; ++v)
-                QTQ[k1 * d + k2] += Q[v + k1 * n] * Q[v + k2 * n];
+                q_k1_q_k2_inner_product += Q[v + k1 * n] * Q[v + k2 * n];
+            QTQ[k1 * d + k2] = q_k1_q_k2_inner_product;
         }
     }
 
@@ -3242,6 +3277,9 @@ void calc_ccd_one_class_obj(mf_float alpha, mf_float c,
     mf_double positive_loss2 = 0.0;
     // Scan through positive matrix entries to compute their loss values.
     // Notice that we assume that positive entries' values are all one.
+#if defined USEOMP
+#pragma omp parallel for num_threads(nr_threads) schedule(static) reduction(+:positive_loss1,positive_loss2)
+#endif
     for (mf_long i = 0; i < data->nnz; ++i)
     {
         const mf_double &r = data->R[i].r;
@@ -3351,6 +3389,9 @@ void ccd_one_class_core(
     // Given that P=zero and Q=random initialized in 
     // Utility::init_model(mf_int m, mf_int n, mf_int k),
     // all predictions are zeros.
+#if defined USEOMP
+#pragma omp parallel for num_threads(util.get_thread_number()) schedule(static)
+#endif
     for (mf_long i = 0; i < nnz; ++i)
     {
         tr_csr->R[i].r = 0.0;
@@ -3459,6 +3500,9 @@ void ccd_one_class_core(
                 }
 
                 // Solve a's sub-problem
+#if defined USEOMP
+#pragma omp parallel for num_threads(util.get_thread_number()) schedule(static)
+#endif
                 for (mf_int u = 0; u < m; ++u)
                 {
                     ////////////////////////////////////////////////////////
@@ -3517,6 +3561,9 @@ void ccd_one_class_core(
                         t[k1] += P_k1[u] * a[u];
                 }
 
+#if defined USEOMP
+#pragma omp parallel for num_threads(util.get_thread_number()) schedule(static)
+#endif
                 for (mf_int v = 0; v < n; ++v)
                 {
                     ////////////////////////////////////////////////////////
@@ -3590,8 +3637,9 @@ void ccd_one_class_core(
 
         // Compute objective value, loss function value, and regularization
         // function value
-        calc_ccd_one_class_obj(alpha, c, m, n, d, lambda_p2, lambda_q2,
-                P, Q, tr_csr, obj, positive_loss, negative_loss, reg);
+        calc_ccd_one_class_obj(util.get_thread_number(), alpha, c, m, n, d,
+                lambda_p2, lambda_q2, P, Q, tr_csr,
+                obj, positive_loss, negative_loss, reg);
 
         // Print number of outer iterations.
         cout.width(4);
@@ -3608,6 +3656,9 @@ void ccd_one_class_core(
             // The following loop computes prediction scores on validation set.
             // Because training scores is also maintained in coordinate descent
             // framework, we didn't need to actively compute scores on training set.
+#if defined USEOMP
+#pragma omp parallel for num_threads(util.get_thread_number()) schedule(static)
+#endif
             for (mf_long i = 0; i < va->nnz; ++i)
             {
                 mf_node &node = va->R[i];
@@ -3621,8 +3672,9 @@ void ccd_one_class_core(
             mf_double va_negative_loss = 0;
             mf_double va_reg = 0;
 
-            calc_ccd_one_class_obj(alpha, c, m, n, d, lambda_p2, lambda_q2,
-                    P, Q, va, va_obj, va_positive_loss, va_negative_loss, va_reg);
+            calc_ccd_one_class_obj(util.get_thread_number(), alpha, c, m, n, d,
+                    lambda_p2, lambda_q2, P, Q, va,
+                    va_obj, va_positive_loss, va_negative_loss, va_reg);
 
             cout.width(13);
             cout << fixed << setprecision(4) << va_positive_loss + va_negative_loss;
@@ -3639,11 +3691,17 @@ void ccd_one_class_core(
     // Transpose P and Q. Note that the format of P and Q here are different
     // than that for mf_model.
     mf_float *P_transpose = new mf_float[m * d];
+#if defined USEOMP
+#pragma omp parallel for num_threads(util.get_thread_number()) schedule(static)
+#endif
     for (mf_int u = 0; u < m; ++u)
         for (mf_int k = 0; k < d; ++k)
             P_transpose[k + u * d] = P[u + k * m];
     delete[] P;
     mf_float *Q_transpose = new mf_float[n * d];
+#if defined USEOMP
+#pragma omp parallel for num_threads(util.get_thread_number()) schedule(static)
+#endif
     for (mf_int v = 0; v < n; ++v)
         for (mf_int k = 0; k < d; ++k)
             Q_transpose[k + v * d] = Q[v + k * n];
