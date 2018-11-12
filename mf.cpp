@@ -559,8 +559,8 @@ mf_float Utility::inner_product(mf_float *p, mf_float *q, mf_int k)
     for(mf_int d = 0; d < k; d += 4)
         XMM = _mm_add_ps(XMM, _mm_mul_ps(
                   _mm_load_ps(p+d), _mm_load_ps(q+d)));
-    XMM = _mm_hadd_ps(XMM, XMM);
-    XMM = _mm_hadd_ps(XMM, XMM);
+    __m128 XMMtmp = _mm_add_ps(XMM, _mm_movehl_ps(XMM, XMM));
+    XMM = _mm_add_ps(XMM, _mm_shuffle_ps(XMMtmp, XMMtmp, 1));
     mf_float product;
     _mm_store_ss(&product, XMM);
     return product;
@@ -1261,8 +1261,12 @@ inline void SolverBase::calc_z(
     for(mf_int d = 0; d < k; d += 4)
         XMMz = _mm_add_ps(XMMz, _mm_mul_ps(
                _mm_load_ps(p+d), _mm_load_ps(q+d)));
-    XMMz = _mm_hadd_ps(XMMz, XMMz);
-    XMMz = _mm_hadd_ps(XMMz, XMMz);
+    // Bit-wise representation of 177 is {1,0}+{1,1}+{0,0}+{0,1} from
+    // high-bit to low-bit, where "+" means concatenating two arrays.
+    __m128 XMMtmp = _mm_add_ps(XMMz, _mm_shuffle_ps(XMMz, XMMz, 177));
+    // Bit-wise representation of 78 is {0,1}+{0,0}+{1,1}+{1,0} from
+    // high-bit to low-bit, where "+" means concatenating two arrays.
+    XMMz = _mm_add_ps(XMMtmp, _mm_shuffle_ps(XMMtmp, XMMtmp, 78));
 }
 
 void SolverBase::finalize(__m128d XMMloss, __m128d XMMerror)
@@ -1528,15 +1532,14 @@ void MFSolver::sg_update(mf_int d_begin, mf_int d_end, __m128 XMMz,
         }
     }
 
-    XMMpG1 = _mm_hadd_ps(XMMpG1, XMMpG1);
-    XMMpG1 = _mm_hadd_ps(XMMpG1, XMMpG1);
-    XMMqG1 = _mm_hadd_ps(XMMqG1, XMMqG1);
-    XMMqG1 = _mm_hadd_ps(XMMqG1, XMMqG1);
-
+    __m128 XMMtmp = _mm_add_ps(XMMpG1, _mm_movehl_ps(XMMpG1, XMMpG1));
+    XMMpG1 = _mm_add_ps(XMMpG1, _mm_shuffle_ps(XMMtmp, XMMtmp, 1));
     XMMpG = _mm_add_ps(XMMpG, _mm_mul_ps(XMMpG1, XMMrk));
-    XMMqG = _mm_add_ps(XMMqG, _mm_mul_ps(XMMqG1, XMMrk));
-
     _mm_store_ss(pG, XMMpG);
+
+    XMMtmp = _mm_add_ps(XMMqG1, _mm_movehl_ps(XMMqG1, XMMqG1));
+    XMMqG1 = _mm_add_ps(XMMqG1, _mm_shuffle_ps(XMMtmp, XMMtmp, 1));
+    XMMqG = _mm_add_ps(XMMqG, _mm_mul_ps(XMMqG1, XMMrk));
     _mm_store_ss(qG, XMMqG);
 }
 #elif defined USEAVX
@@ -2179,8 +2182,12 @@ inline void BPRSolver::calc_z(
     for(mf_int d = 0; d < k; d += 4)
         XMMz = _mm_add_ps(XMMz, _mm_mul_ps(_mm_load_ps(p+d),
                _mm_sub_ps(_mm_load_ps(q+d), _mm_load_ps(w+d))));
-    XMMz = _mm_hadd_ps(XMMz, XMMz);
-    XMMz = _mm_hadd_ps(XMMz, XMMz);
+    // Bit-wise representation of 177 is {1,0}+{1,1}+{0,0}+{0,1} from
+    // high-bit to low-bit, where "+" means concatenating two arrays.
+    __m128 XMMtmp = _mm_add_ps(XMMz, _mm_shuffle_ps(XMMz, XMMz, 177));
+    // Bit-wise representation of 78 is {0,1}+{0,0}+{1,1}+{1,0} from
+    // high-bit to low-bit, where "+" means concatenating two arrays.
+    XMMz = _mm_add_ps(XMMz, _mm_shuffle_ps(XMMtmp, XMMtmp, 78));
 }
 
 void BPRSolver::arrange_block(__m128d &XMMloss, __m128d &XMMerror)
@@ -2299,19 +2306,28 @@ void BPRSolver::sg_update(mf_int d_begin, mf_int d_end, __m128 XMMz,
         }
     }
 
-    XMMpG1 = _mm_hadd_ps(XMMpG1, XMMpG1);
-    XMMpG1 = _mm_hadd_ps(XMMpG1, XMMpG1);
-    XMMqG1 = _mm_hadd_ps(XMMqG1, XMMqG1);
-    XMMqG1 = _mm_hadd_ps(XMMqG1, XMMqG1);
-    XMMwG1 = _mm_hadd_ps(XMMwG1, XMMwG1);
-    XMMwG1 = _mm_hadd_ps(XMMwG1, XMMwG1);
-
+    // Update learning rate of latent vector p. Squared derivatives along all
+    // latent dimensions will be computed first. Then, their average will be
+    // added into the associated squared-gradient sum.
+    __m128 XMMtmp = _mm_add_ps(XMMpG1, _mm_movehl_ps(XMMpG1, XMMpG1));
+    XMMpG1 = _mm_add_ps(XMMpG1, _mm_shuffle_ps(XMMtmp, XMMtmp, 1));
     XMMpG = _mm_add_ps(XMMpG, _mm_mul_ps(XMMpG1, XMMrk));
-    XMMqG = _mm_add_ps(XMMqG, _mm_mul_ps(XMMqG1, XMMrk));
-    XMMwG = _mm_add_ps(XMMwG, _mm_mul_ps(XMMwG1, XMMrk));
-
     _mm_store_ss(pG, XMMpG);
+
+    // Update learning rate of latent vector q. Squared derivatives along all
+    // latent dimensions will be computed first. Then, their average will be
+    // added into the associated squared-gradient sum.
+    XMMtmp = _mm_add_ps(XMMqG1, _mm_movehl_ps(XMMqG1, XMMqG1));
+    XMMqG1 = _mm_add_ps(XMMqG1, _mm_shuffle_ps(XMMtmp, XMMtmp, 1));
+    XMMqG = _mm_add_ps(XMMqG, _mm_mul_ps(XMMqG1, XMMrk));
     _mm_store_ss(qG, XMMqG);
+
+    // Update learning rate of latent vector w. Squared derivatives along all
+    // latent dimensions will be computed first. Then, their average will be
+    // added into the associated squared-gradient sum.
+    XMMtmp = _mm_add_ps(XMMwG1, _mm_movehl_ps(XMMwG1, XMMwG1));
+    XMMwG1 = _mm_add_ps(XMMwG1, _mm_shuffle_ps(XMMtmp, XMMtmp, 1));
+    XMMwG = _mm_add_ps(XMMwG, _mm_mul_ps(XMMwG1, XMMrk));
     _mm_store_ss(wG, XMMwG);
 }
 
