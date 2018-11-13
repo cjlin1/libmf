@@ -1,5 +1,7 @@
 language: cpp
 
+sudo: required
+
 install:
     - sudo apt install libomp-dev
     - make -e
