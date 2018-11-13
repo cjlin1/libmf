@@ -1,0 +1,14 @@
+language: cpp
+
+install:
+    - sudo apt install libomp-dev
+    - make -e
+
+matrix:
+    - env: DFLAG="-DUSESSE -DUSEOMP"
+    - env: DFLAG="-DUSEAVX -DUSEOMP"
+    - env: DFLAG="-DUSEOMP"
+    - env: DFLAG=""
+
+script:
+    - cd demo && sh demo.sh
