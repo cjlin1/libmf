@@ -1042,18 +1042,12 @@ mf_model* Utility::init_model(mf_int m, mf_int n, mf_int k)
     // since the approximated rating matrix is PQ^T.
 
     // Initialize P with zeros
-#if defined USEOMP
-#pragma omp parallel for num_threads(util.get_thread_number()) schedule(static)
-#endif
     for (mf_long i = 0; i < k * m; ++i)
         model->P[i] = 0.0;
 
     // Initialize Q with random numbers
     default_random_engine generator;
     uniform_real_distribution<mf_float> distribution(0.0, 1.0);
-#if defined USEOMP
-#pragma omp parallel for num_threads(util.get_thread_number()) schedule(static)
-#endif
     for (mf_long i = 0; i < k * n; ++i)
         model->Q[i] = distribution(generator);
 
