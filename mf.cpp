@@ -434,7 +434,7 @@ public:
                         vector<mf_int> &omega_p, vector<mf_int> &omega_q);
     mf_double calc_reg2(mf_model &model, mf_float lambda_p, mf_float lambda_q,
                         vector<mf_int> &omega_p, vector<mf_int> &omega_q);
-    string get_error_legend();
+    string get_error_legend() const;
     mf_double calc_error(vector<BlockBase*> &blocks,
                          vector<mf_int> &cv_block_ids,
                          mf_model const &model);
@@ -443,17 +443,23 @@ public:
     static mf_problem* copy_problem(mf_problem const *prob, bool copy_data);
     static vector<mf_int> gen_random_map(mf_int size);
     static mf_float* malloc_aligned_float(mf_long size);
+    // Initialization function for stochastic gradient method.
+    // Factor matrices P and Q are both randomly initialized.
     static mf_model* init_model(mf_int loss, mf_int m, mf_int n,
                                 mf_int k, mf_float avg,
                                 vector<mf_int> &omega_p,
                                 vector<mf_int> &omega_q);
+    // Initialization function for one-class CD.
+    // It does zero-initialization on factor matrix P and random initialization
+    // on factor matrix Q.
+    static mf_model* init_model(mf_int m, mf_int n, mf_int k);
     static mf_float inner_product(mf_float *p, mf_float *q, mf_int k);
     static vector<mf_int> gen_inv_map(vector<mf_int> &map);
     static void shrink_model(mf_model &model, mf_int k_new);
     static void shuffle_model(mf_model &model,
                               vector<mf_int> &p_map,
                               vector<mf_int> &q_map);
-
+    mf_int get_thread_number() const { return nr_threads; };
 private:
     mf_int fun;
     mf_int nr_threads;
@@ -742,7 +748,7 @@ mf_double Utility::calc_error(
     return error;
 }
 
-string Utility::get_error_legend()
+string Utility::get_error_legend() const
 {
     switch(fun)
     {
@@ -766,6 +772,8 @@ string Utility::get_error_legend()
         case P_COL_BPR_MFOC:
             return string("bprloss");
             break;
+        case P_L2_MFOC:
+            return string("sqerror");
         default:
             return string();
             break;
@@ -995,6 +1003,53 @@ mf_model* Utility::init_model(mf_int fun,
 
     init1(model->P, m, omega_p);
     init1(model->Q, n, omega_q);
+
+    return model;
+}
+
+// Initialize P=[\bar{p}_1, ..., \bar{p}_d] and Q=[\bar{q}_1, ..., \bar{q}_d].
+// Note that \bar{q}_{kv} is Q[k*n+v] and \bar{p}_{ku} is P[k*m+u].  One may
+// notice that P and Q here are actually the transposes of P and Q in fpsg(...)
+// because fpsg(...) uses P^TQ (where P and Q are respectively k-by-m and
+// k-by-n) to approximate the given rating matrix R while ccd_one_class(...)
+// uses PQ^T (where P and Q are respectively m-by-k and n-by-k.
+mf_model* Utility::init_model(mf_int m, mf_int n, mf_int k)
+{
+    mf_model *model = new mf_model;
+
+    model->fun = P_L2_MFOC;
+    model->m = m;
+    model->n = n;
+    model->k = k;
+    model->b = 0.0; // One-class matrix factorization doesn't have bias.
+    model->P = nullptr;
+    model->Q = nullptr;
+
+    try
+    {
+        model->P = Utility::malloc_aligned_float((mf_long)model->m*model->k);
+        model->Q = Utility::malloc_aligned_float((mf_long)model->n*model->k);
+    }
+    catch(bad_alloc const &e)
+    {
+        cerr << e.what() << endl;
+        mf_destroy_model(&model);
+        throw;
+    }
+
+    // Our initialization strategy is that all P's elements are zero and do
+    // random initization on Q. Thus, all initial predicted ratings are all zero
+    // since the approximated rating matrix is PQ^T.
+
+    // Initialize P with zeros
+    for (mf_long i = 0; i < k * m; ++i)
+        model->P[i] = 0.0;
+
+    // Initialize Q with random numbers
+    default_random_engine generator;
+    uniform_real_distribution<mf_float> distribution(0.0, 1.0);
+    for (mf_long i = 0; i < k * n; ++i)
+        model->Q[i] = distribution(generator);
 
     return model;
 }
@@ -3117,6 +3172,709 @@ catch(exception const &e)
     return model;
 }
 
+// The function implements an efficient method to compute objective function
+// minimized by coordinate descent method.
+// 
+// \min_{P, Q} 0.5 * \sum_{(u,v)\in\Omega^+} (1-r_{u,v})^2  +
+//             0.5 * \alpha \sum_{(u,v)\not\in\Omega^+} (c-r_{u,v})^2 +
+//             0.5 * \lambda_p2 * ||P||_F^2 + 0.5 * \lambda_q2 * ||Q||_F^2
+// where
+//  1. (u,v) is a tuple of row index and column index,
+//  2. \Omega^+ a collections of (u,v) which specifies the locations of
+//     positive entries in the training matrix.
+//  3. r_{u,v} is the predicted rating at (u,v)
+//  4. \alpha is the weight of negative entries' loss.
+//  5. c is the desired value at every negative entries.
+//  6. ||P||_F is matrix P's Frobenius norm.
+//  7. \lambda_p2 is the regularization coefficient of P.
+//  
+//  Note that coordinate descent method's P and Q are the transpose
+//  counterparts of P and Q in stochastic gradient method. Let R denoates 
+//  the training matrix. For stochastic gradient method, we have R ~ P^TQ.
+//  For coordinate descent method, we have R ~ PQ^T.
+void calc_ccd_one_class_obj(const mf_int nr_threads,
+        const mf_float alpha, const mf_float c,
+        const mf_int m, const mf_int n, const mf_int d,
+        const mf_float lambda_p2, const mf_float lambda_q2,
+        const mf_float *P, const mf_float *Q,
+        shared_ptr<const mf_problem> data,
+        /*output*/ mf_double &obj,
+        /*output*/ mf_double &positive_loss,
+        /*output*/ mf_double &negative_loss,
+        /*output*/ mf_double &reg)
+{
+    // Declare regularization term of P.
+    mf_double p_square_norm = 0.0;
+    // Reduce P along column axis, which is the sum of rows in P. 
+    vector<mf_double> all_p_sum(d, 0.0);
+    // Compute square of Frobenius norm on P and sum of all rows in P.
+    for (mf_int k = 0; k < d; ++k)
+    {
+        // Declare a temporal buffer of all_p_sum[k] for using OpenMP.
+        mf_double all_p_sum_k = 0.0;
+#if defined USEOMP
+#pragma omp parallel for num_threads(nr_threads) schedule(static) reduction(+:p_square_norm,all_p_sum_k)
+#endif
+        for (mf_int u = 0; u < m; ++u)
+        {
+            const mf_float &p_ku = P[u + k * m];
+            p_square_norm += p_ku * p_ku;
+            all_p_sum_k += p_ku;
+        }
+        all_p_sum[k] = all_p_sum_k;
+    }
+
+    // Declare regularization term of Q
+    mf_double q_square_norm = 0.0;
+    // Reduce Q along column axis, whihc is the sum of rows in Q.
+    vector<mf_double> all_q_sum(d, 0.0);
+    // Compute square of Frobenius norm on Q and sum of all elements in Q
+    for (mf_int k = 0; k < d; ++k)
+    {
+        // Declare a temporal buffer of all_p_sum[k] for using OpenMP.
+        mf_double all_q_sum_k = 0.0;
+#if defined USEOMP
+#pragma omp parallel for num_threads(nr_threads) schedule(static) reduction(+:q_square_norm,all_q_sum_k)
+#endif
+        for (mf_int v = 0; v < n; ++v)
+        {
+            const mf_float &q_kv = Q[v + k * n];
+            q_square_norm += q_kv * q_kv;
+            all_q_sum_k += q_kv;
+        }
+        all_q_sum[k] = all_q_sum_k;
+    }
+
+    // PTP = P^T * P, where P^T is the transpose of P. Note that P is a m-by-d
+    // matrix and PTP is a d-by-d matrix.
+    vector<mf_double> PTP(d * d, 0.0);
+    // QTQ = Q^T * P, a d-by-d matrix.
+    vector<mf_double> QTQ(d * d, 0.0);
+    // We calculate PTP and QTQ because they are needed in the computation of
+    // negative entries' loss function.
+    for (mf_int k1 = 0; k1 < d; ++k1)
+    {
+        for (mf_int k2 = 0; k2 < d; ++k2)
+        {
+            // Inner product of the k1 and k2 columns in P, a m-by-d matrix.
+            mf_double p_k1_p_k2_inner_product = 0.0;
+#if defined USEOMP
+#pragma omp parallel for num_threads(nr_threads) schedule(static) reduction(+:p_k1_p_k2_inner_product)
+#endif
+            for (mf_int u = 0; u < m; ++u)
+                p_k1_p_k2_inner_product += P[u + k1 * m] * P[u + k2 * m];
+            PTP[k1 * d + k2] = p_k1_p_k2_inner_product;
+
+            // Inner product of the k1 and k2 columns in Q, a n-by-d matrix.
+            mf_double q_k1_q_k2_inner_product = 0.0;
+#if defined USEOMP
+#pragma omp parallel for num_threads(nr_threads) schedule(static) reduction(+:q_k1_q_k2_inner_product)
+#endif
+            for (mf_int v = 0; v < n; ++v)
+                q_k1_q_k2_inner_product += Q[v + k1 * n] * Q[v + k2 * n];
+            QTQ[k1 * d + k2] = q_k1_q_k2_inner_product;
+        }
+    }
+
+    // Initialize loss function value of positive matrix entries.
+    // It consists two parts. The first part is the true prediction error
+    // while the second part is only used for implementing faster algorithm.
+    mf_double positive_loss1 = 0.0;
+    mf_double positive_loss2 = 0.0;
+    // Scan through positive matrix entries to compute their loss values.
+    // Notice that we assume that positive entries' values are all one.
+#if defined USEOMP
+#pragma omp parallel for num_threads(nr_threads) schedule(static) reduction(+:positive_loss1,positive_loss2)
+#endif
+    for (mf_long i = 0; i < data->nnz; ++i)
+    {
+        const mf_double &r = data->R[i].r;
+        positive_loss1 += (1.0 - r) * (1.0 - r);
+        positive_loss2 -= alpha * (c - r) * (c - r); 
+    }
+    positive_loss1 *= 0.5;
+    positive_loss2 *= 0.5;
+
+    // Declare loss terms related to negative matrix entries.
+    mf_double negative_loss1 = c * c * m * n;
+    mf_double negative_loss2 = 0.0;
+    mf_double negative_loss3 = 0.0;
+    // Compute loss terms.
+    for (mf_int k1 = 0; k1 < d; ++k1)
+    {
+        negative_loss2 += all_p_sum[k1] * all_q_sum[k1];
+        for (mf_int k2 = 0; k2 < d; ++k2)
+            negative_loss3 += PTP[k1 + k2 * d] * QTQ[k2 + k1 * d];
+    }
+    // Compute the loss function of negative matrix entries.
+    mf_double negative_loss4 = negative_loss = 0.5 * alpha *
+        (negative_loss1 - 2 * c * negative_loss2 + negative_loss3);
+
+    // Assign results to output variables.
+    reg = 0.5 * lambda_p2 * p_square_norm + 0.5 * lambda_q2 * q_square_norm;
+    obj = positive_loss1 + positive_loss2 + negative_loss4 + reg;
+    positive_loss = positive_loss1;
+    negative_loss = negative_loss4 + positive_loss2;
+}
+
+void ccd_one_class_core(
+    const Utility &util,
+    shared_ptr<const mf_problem> tr_csr,
+    shared_ptr<const mf_problem> tr_csc,
+    shared_ptr<const mf_problem> va,
+    const mf_parameter param,
+    const vector<mf_node*> &ptrs_u,
+    const vector<mf_node*> &ptrs_v,
+    const vector<mf_int> &omega_p,
+    const vector<mf_int> &omega_q,
+    shared_ptr<mf_model> &model)
+{
+    // Check problems stored in CSR and CSC formats
+    if (tr_csr == nullptr) throw invalid_argument("CSR problem pointer is null.");
+    if (tr_csc == nullptr) throw invalid_argument("CSC problem pointer is null.");
+
+    if (tr_csr->m != tr_csc->m)
+        throw logic_error(
+                "Row counts must be identical in CSR and CSC formats: " +
+                to_string(tr_csr->m) + " != " + to_string(tr_csc->m));
+    const mf_int m = tr_csr->m;
+
+    if (tr_csr->n != tr_csc->n)
+        throw logic_error(
+                "Column counts must be identical in CSR and CSC formats: " +
+                to_string(tr_csr->n) + " != " + to_string(tr_csc->n));
+    const mf_int n = tr_csr->n;
+
+    if (tr_csc->nnz != tr_csc->nnz)
+        throw logic_error(
+                "Numbers of data points must be identical in CSR and CSC formats: " +
+                to_string(tr_csr->nnz) + " != " + to_string(tr_csc->nnz));
+    const mf_long nnz = tr_csr->nnz;
+
+    // Check formulation parameters
+    if (param.k <= 0)
+        throw invalid_argument(
+                "Latent dimension must be positive but got " + 
+                to_string(param.k));
+    const mf_int d = param.k;
+
+    if (param.lambda_p2 <= 0)
+        throw invalid_argument(
+                "P's regularization coefficient must be positive but got " + 
+                to_string(param.lambda_p2));
+    if (param.lambda_q2 <= 0)
+        throw invalid_argument(
+                "Q's regularization coefficient must be positive but got " + 
+                to_string(param.lambda_q2));
+
+    // Check some resources prepared internally
+    if (ptrs_u.size() != (size_t)m + 1)
+        throw invalid_argument("Number of row pointer must be " +
+                to_string(m + 1) + " but got " + to_string(ptrs_u.size()));
+    if (ptrs_v.size() != (size_t)n + 1)
+        throw invalid_argument("Number of column pointer must be " +
+                to_string(n + 1) + " but got " + to_string(ptrs_v.size()));
+
+    // Some constants of the formulation.
+    // alpha: coefficient of negative part
+    // c: the desired prediction values of unobserved ratings
+    // lambda_p2: regularization coefficient of P's L2-norm
+    // lambda_q2: regularization coefficient of P's Q2-norm
+    const mf_float alpha = param.alpha;
+    const mf_float c = param.c;
+    const mf_float lambda_p2 = param.lambda_p2;
+    const mf_float lambda_q2 = param.lambda_q2;
+
+    // Initialize P and Q. Note that \bar{q}_{kv} is Q[k*n+v]
+    // and \bar{p}_{ku} is P[k*m+u]. One may notice that P and
+    // Q here are actually the transposes of P and Q in FPSG.
+    mf_float *P = model->P;
+    mf_float *Q = model->Q;
+
+    // Cache the prediction values on positive matrix entries.
+    // Given that P=zero and Q=random initialized in 
+    // Utility::init_model(mf_int m, mf_int n, mf_int k),
+    // all predictions are zeros.
+#if defined USEOMP
+#pragma omp parallel for num_threads(util.get_thread_number()) schedule(static)
+#endif
+    for (mf_long i = 0; i < nnz; ++i)
+    {
+        tr_csr->R[i].r = 0.0;
+        tr_csc->R[i].r = 0.0;
+    }
+
+    // If the model is not initialized by
+    // Utility::init_model(mf_int m, mf_int n, mf_int k),
+    // please use the following initialization code to compute
+    // and cache all prediction values on positive entries.
+    /*
+    for (mf_long i = 0; i < nnz; ++i)
+    {
+        mf_node &node = tr_csr->R[i];
+        node.r = 0;
+        for (mf_int k = 0; k < d; ++k)
+            node.r += P[node.u + k * m]*Q[node.v + k * n];
+    }
+    for (mf_long i = 0; i < nnz; ++i)
+    {
+        mf_node &node = tr_csc->R[i];
+        node.r = 0;
+        for (mf_int k = 0; k < d; ++k)
+            node.r += P[node.u + k * m]*Q[node.v + k * n];
+    }
+    */
+
+    if(!param.quiet)
+    {
+        cout.width(4);
+        cout << "iter";
+        cout.width(13);
+        cout << "tr_"+util.get_error_legend();
+        cout.width(14);
+        cout << "tr_"+util.get_error_legend() << "+";
+        cout.width(14);
+        cout << "tr_"+util.get_error_legend() << "-";
+        if(va->nnz != 0)
+        {
+            cout.width(13);
+            cout << "va_"+util.get_error_legend();
+            cout.width(14);
+            cout << "va_"+util.get_error_legend() << "+";
+            cout.width(14);
+            cout << "va_"+util.get_error_legend() << "-";
+        }
+        cout.width(13);
+        cout << "obj";
+        cout << "\n";
+    }
+
+    /////////////////////////////////////////////////////////////////
+    // Minimize the objective function via coordinate descent method
+    ////////////////////////////////////////////////////////////////
+    // Solve P and Q using coordinate descent.
+    // P = [\bar{p}_1, ..., \bar{p}_d] \in R^{m \times k}
+    // Q = [\bar{q}_1, ..., \bar{q}_d] \in R^{n \times k}
+    // Finally, the rating matrice R would be approximated via
+    // R ~ PQ^T \in R^{m \times n}
+    for (mf_int outer = 0; outer < param.nr_iters; ++outer)
+    {
+        // Update \bar{p}_k and \bar{q}_k. The basic idea is
+        // to replace \bar{p}_k and \bar{q}_k with a and b,
+        // and then minimizes the original objective function.
+        for (mf_int k = 0; k < d; ++k)
+        {
+            // Get the pointer to the first element of \bar{p}_k (and
+            // \bar{q}_k).
+            mf_float *P_k = P + m * k;
+            mf_float *Q_k = Q + n * k;
+
+            // Initialize a and b with the value they need to replace
+            // so that we can ensure improvement at each iteration.
+            vector<mf_float> a(P_k, P_k + m);
+            vector<mf_float> b(Q_k, Q_k + n);
+
+            for (mf_int inner = 0; inner < 3; ++inner)
+            {
+                ///////////////////////////////////////////////////////////////
+                // Update a:
+                //  1. Compute and cache constants
+                //  2. For each coordinate of a, calculate optimal update using
+                //     Newton method 
+                ///////////////////////////////////////////////////////////////
+
+                // Compute and cache constants
+                // \hat{b} = \sum_{v=1}^n \bar{b}_v
+                // \tilde{b} = \sum_{v=1}^n \bar{b}_v^2
+                mf_double b_hat = 0.0;
+                mf_double b_tilde = 0.0;
+#if defined USEOMP
+#pragma omp parallel for num_threads(util.get_thread_number()) schedule(static) reduction(+:b_hat,b_tilde)
+#endif
+                for (mf_int v = 0; v < n; ++v)
+                {
+                    const mf_double &b_v = b[v]; 
+                    b_hat += b_v;
+                    b_tilde += b_v * b_v;
+                }
+
+                // Compute and cache a constant vector
+                // s_k = \sum_{v=1}^n \bar{q}_{kv}b_v, k = 1, ..., d
+                vector<mf_double> s(d, 0.0); 
+                for (mf_int k1 = 0; k1 < d; ++k1)
+                {
+                    // Buffer variable for using OpenMP
+                    mf_double s_k1 = 0;
+                    const mf_float *Q_k1 = Q + k1 * n;
+#if defined USEOMP
+#pragma omp parallel for num_threads(util.get_thread_number()) schedule(static) reduction(+:s_k1)
+#endif
+                    for (mf_int v = 0; v < n; ++v)
+                        s_k1 += Q_k1[v] * b[v];
+                    s[k1] = s_k1;
+                }
+
+                // Solve a's sub-problem
+#if defined USEOMP
+#pragma omp parallel for num_threads(util.get_thread_number()) schedule(static)
+#endif
+                for (mf_int u = 0; u < m; ++u)
+                {
+                    ////////////////////////////////////////////////////////
+                    // Update a[u] via Newton method. Let g_u and h_u denote
+                    // the first-order and second-order derivatives w.r.t.
+                    // a[u]. The following code implements
+                    //  a[u] <-- a[u] - g_u/h_u
+                    ////////////////////////////////////////////////////////
+
+                    // Initialize temporal variables for calculating gradient and hessian.
+                    mf_double g_u_1 = 0.0;
+                    mf_double h_u_1 = 0.0;
+                    mf_double g_u_2 = 0.0;
+                    // Scan through specified entries at the u-th row
+                    for (const mf_node *ptr = ptrs_u[u]; ptr != ptrs_u[u+1]; ++ptr)
+                    {
+                        const mf_int &v = ptr->v;
+                        const mf_float &b_v = b[v];
+                        g_u_1 += b_v;
+                        h_u_1 += b_v * b_v;
+                        g_u_2 += (ptr->r - P_k[u] * Q_k[v] + a[u] * b_v) * b_v;
+                    }
+                    mf_double g_u_3 = -c * b_hat - P_k[u] * s[k] + a[u] * b_tilde;
+                    for (mf_int k1 = 0; k1 < d; ++k1)
+                        g_u_3 += P[m * k1 + u] * s[k1];
+                    mf_double g_u = -(1.0 - alpha * c) * g_u_1 + (1.0 - alpha) * g_u_2 + alpha * g_u_3 + lambda_p2 * a[u];
+                    mf_double h_u = (1.0 - alpha) * h_u_1 + alpha * b_tilde + lambda_p2;
+                    a[u] -= static_cast<mf_float>(g_u / h_u);
+                }
+
+                ///////////////////////////////////////////////////////////////
+                // Update b:
+                //  1. Compute and cache constants
+                //  2. For each coordinate of b, calculate optimal update using
+                //     Newton method 
+                ///////////////////////////////////////////////////////////////
+                // Compute and cache a_hat, a_tilde
+                // \hat{a} = \sum_{u=1}^m \bar{a}_u
+                // \tilde{a} = \sum_{u=1}^m \bar{a}_u^2
+                mf_double a_hat = 0.0;
+                mf_double a_tilde = 0.0;
+#if defined USEOMP
+#pragma omp parallel for num_threads(util.get_thread_number()) schedule(static) reduction(+:a_hat,a_tilde)
+#endif
+                for (mf_int u = 0; u < m; ++u)
+                {
+                    const mf_float &a_u = a[u];
+                    a_hat += a_u;
+                    a_tilde += a_u * a_u;
+                }
+
+                // Compute and cache t
+                // t_k = \sum_{u=1}^m \bar{a}_{ku}a_u, k = 1, ..., d
+                vector<mf_double> t(d, 0.0);
+                for (mf_int k1 = 0; k1 < d; ++k1)
+                {
+                    // Declare buffer variable for using OpenMP
+                    mf_double t_k1 = 0;
+                    const mf_float *P_k1 = P + k1 * m;
+#if defined USEOMP
+#pragma omp parallel for num_threads(util.get_thread_number()) schedule(static) reduction(+:t_k1)
+#endif
+                    for (mf_int u = 0; u < m; ++u)
+                        t_k1 += P_k1[u] * a[u];
+                    t[k1] = t_k1;
+                }
+
+#if defined USEOMP
+#pragma omp parallel for num_threads(util.get_thread_number()) schedule(static)
+#endif
+                for (mf_int v = 0; v < n; ++v)
+                {
+                    ////////////////////////////////////////////////////////
+                    // Update b[v] via Newton method. Let g_v and h_v denote
+                    // the first-order and second-order derivatives w.r.t.
+                    // b[v]. The following code implements
+                    //  b[v] <-- b[v] - g_v/h_v
+                    ////////////////////////////////////////////////////////
+
+                    // Initialize temporal variables for calculating gradient and hessian.
+                    mf_double g_v_1 = 0;
+                    mf_double g_v_2 = 0;
+                    mf_double h_v_1 = 0;
+                    // Scan through all positive entries at column v
+                    for (const mf_node *ptr = ptrs_v[v]; ptr != ptrs_v[v+1]; ++ptr)
+                    {
+                        const mf_int &u = ptr->u;
+                        const mf_float &a_u = a[u];
+                        g_v_1 += a_u;
+                        h_v_1 += a_u * a_u;
+                        g_v_2 += (ptr->r - P_k[u] * Q_k[v] + a_u * b[v]) * a_u;
+                    }
+                    mf_double g_v_3 = -c * a_hat - Q_k[v] * t[k] + b[v] * a_tilde;
+                    for (mf_int k1 = 0; k1 < d; ++k1)
+                        g_v_3 += Q[n * k1 + v] * t[k1];
+                    mf_double g_v = -(1.0 - alpha * c) * g_v_1 + (1.0 - alpha) * g_v_2 +
+                        alpha * g_v_3 + lambda_q2 * b[v];
+                    mf_double h_v = (1 - alpha) * h_v_1 + alpha * a_tilde + lambda_q2;
+                    b[v] -= static_cast<mf_float>(g_v / h_v);
+                }
+
+                ///////////////////////////////////////////////////////////////
+                // Update cached variables.
+                ///////////////////////////////////////////////////////////////
+                // Update prediction error in CSR format
+                // \bar{r}_{uv} <- \bar{r}_{uv} - \bar_{p}_{ku}*\bar_{q}_{kv} + a_u*b_v
+#if defined USEOMP
+#pragma omp parallel for num_threads(util.get_thread_number()) schedule(static)
+#endif
+                for (mf_long i = 0; i < tr_csr->nnz; ++i)
+                {
+                    // Update prediction values of positive entries in CSR
+                    mf_node *csr_ptr = tr_csr->R + i;
+                    const mf_int &u_csr = csr_ptr->u;
+                    const mf_int &v_csr = csr_ptr->v;
+                    csr_ptr->r += a[u_csr] * b[v_csr] - P_k[u_csr] * Q_k[v_csr];
+
+                    // Update prediction values of positive entries in CSC
+                    mf_node *csc_ptr = tr_csc->R + i;
+                    const mf_int &u_csc = csc_ptr->u;
+                    const mf_int &v_csc = csc_ptr->v;
+                    csc_ptr->r += a[u_csc] * b[v_csc] - P_k[u_csc] * Q_k[v_csc];
+                }
+
+#if defined USEOMP
+#pragma omp parallel for num_threads(util.get_thread_number()) schedule(static)
+#endif
+                // Update P_k and Q_k
+                for (mf_int u = 0; u < m; ++u)
+                    P_k[u] = a[u];
+#if defined USEOMP
+#pragma omp parallel for num_threads(util.get_thread_number()) schedule(static)
+#endif
+                for (mf_int v = 0; v < n; ++v)
+                    Q_k[v] = b[v];
+            }
+        }
+
+        // Declare variable for storing objective value being minimized
+        // by the training procedure. Note that The objective value consists
+        // of two parts, loss function and regularization function.
+        mf_double obj = 0;
+        // Declare variables for storing loss function's value.
+        mf_double positive_loss = 0; // for positive entries in training matrix.
+        mf_double negative_loss = 0; // for negative entries in training matrix.
+        // Declare variable for storing regularization function's value.
+        mf_double reg = 0;
+
+        // Compute objective value, loss function value, and regularization
+        // function value
+        calc_ccd_one_class_obj(util.get_thread_number(), alpha, c, m, n, d,
+                lambda_p2, lambda_q2, P, Q, tr_csr,
+                obj, positive_loss, negative_loss, reg);
+
+        // Print number of outer iterations.
+        cout.width(4);
+        cout << outer;
+        cout.width(13);
+        cout << fixed << setprecision(4) << positive_loss + negative_loss;
+        cout.width(15);
+        cout << fixed << setprecision(4) << positive_loss;
+        cout.width(15);
+        cout << fixed << setprecision(4) << negative_loss;
+
+        if (va->nnz != 0)
+        {
+            // The following loop computes prediction scores on validation set.
+            // Because training scores is also maintained in coordinate descent
+            // framework, we didn't need to actively compute scores on training set.
+#if defined USEOMP
+#pragma omp parallel for num_threads(util.get_thread_number()) schedule(static)
+#endif
+            for (mf_long i = 0; i < va->nnz; ++i)
+            {
+                mf_node &node = va->R[i];
+                node.r = 0;
+                for (mf_int k = 0; k < d; ++k)
+                    node.r += P[node.u + k * m]*Q[node.v + k * n];
+            }
+
+            mf_double va_obj = 0;
+            mf_double va_positive_loss = 0;
+            mf_double va_negative_loss = 0;
+            mf_double va_reg = 0;
+
+            calc_ccd_one_class_obj(util.get_thread_number(), alpha, c, m, n, d,
+                    lambda_p2, lambda_q2, P, Q, va,
+                    va_obj, va_positive_loss, va_negative_loss, va_reg);
+
+            cout.width(13);
+            cout << fixed << setprecision(4) << va_positive_loss + va_negative_loss;
+            cout.width(15);
+            cout << fixed << setprecision(4) << va_positive_loss;
+            cout.width(15);
+            cout << fixed << setprecision(4) << va_negative_loss;
+        }
+        cout.width(13);
+        cout << fixed << setprecision(4) << scientific << obj;
+        cout << "\n" << flush;
+    }
+
+    // Transpose P and Q. Note that the format of P and Q here are different
+    // than that for mf_model.
+    mf_float *P_transpose = new mf_float[m * d];
+#if defined USEOMP
+#pragma omp parallel for num_threads(util.get_thread_number()) schedule(static)
+#endif
+    for (mf_int u = 0; u < m; ++u)
+        for (mf_int k = 0; k < d; ++k)
+            P_transpose[k + u * d] = P[u + k * m];
+    delete[] P;
+    mf_float *Q_transpose = new mf_float[n * d];
+#if defined USEOMP
+#pragma omp parallel for num_threads(util.get_thread_number()) schedule(static)
+#endif
+    for (mf_int v = 0; v < n; ++v)
+        for (mf_int k = 0; k < d; ++k)
+            Q_transpose[k + v * d] = Q[v + k * n];
+    delete[] Q;
+
+    // Set the passed-in model to the result learned from the given data
+    // model is null
+    model->m = m;
+    model->n = n;
+    model->k = d;
+    model->b = 0.0;
+    model->P = P_transpose;
+    model->Q = Q_transpose;
+}
+
+shared_ptr<mf_model> ccd_one_class(
+    mf_problem const *tr_,
+    mf_problem const *va_,
+    mf_parameter param,
+    vector<mf_int> cv_blocks=vector<mf_int>(),
+    mf_double *cv_error=nullptr)
+{
+    shared_ptr<mf_model> model;
+try
+{
+    Utility util(param.fun, param.nr_threads);
+    // Training matrix in compressed row format (sort nodes by user id)
+    shared_ptr<mf_problem> tr_csr;
+    // Training matrix in compressed column format (sort nodes by item id)
+    shared_ptr<mf_problem> tr_csc;
+    shared_ptr<mf_problem> va;
+    // In tr_csr->R, i-th row starting at row_ptrs[i] and eneding right before row_ptrs[i+1]
+    vector<mf_node*> ptrs_u(tr_->m + 1, nullptr);
+    // In tr_csv->R, i-th column starting at col_ptrs[i] and eneding right before col_ptrs[i+1]
+    vector<mf_node*> ptrs_v(tr_->n + 1, nullptr);
+
+    if(param.copy_data)
+    {
+        struct deleter
+        {
+            void operator() (mf_problem *prob)
+            {
+                delete[] prob->R;
+                delete prob;
+            }
+        };
+
+        // Need a row-major and a column-major training formats
+        // Thus, two duplicates are made.
+        tr_csr = shared_ptr<mf_problem>(
+                Utility::copy_problem(tr_, true), deleter());
+        tr_csc = shared_ptr<mf_problem>(
+                Utility::copy_problem(tr_, true), deleter());
+        va = shared_ptr<mf_problem>(
+                Utility::copy_problem(va_, true), deleter());
+    }
+    else
+    {
+        // Need a row-major and a column-major training formats
+        // The original data is reused as row-major one so
+        // one duplicate for column-major one would be created.
+        tr_csr = shared_ptr<mf_problem>(Utility::copy_problem(tr_, false));
+        tr_csc = shared_ptr<mf_problem>(Utility::copy_problem(tr_, true));
+        va = shared_ptr<mf_problem>(Utility::copy_problem(va_, false));
+    }
+
+    // Make the training set CSR/CSC by sorting their nodes. More specifically,
+    // a matrix with values sorted by row index is CSR and vice versa. We will
+    // compute the starting location for each row (CSR) and each column (CSC)
+    // later.
+    sort(tr_csr->R, tr_csr->R+tr_csr->nnz, sort_node_by_p());
+    sort(tr_csc->R, tr_csc->R+tr_csc->nnz, sort_node_by_q());
+
+
+    // The frequency table of row indexes. The u-th element will be used to
+    // scale the regularization coefficient of the u-th column in P. That is,
+    // the effective regularization coefficient of the u-th column is
+    // lambda_p2 * omega_p[u].
+    vector<mf_int> omega_p(tr_->m, 1.0);
+
+    // The frequency table of column indexes. Similar to omega_p, this vector
+    // stores the scaling factors for columns in Q. 
+    vector<mf_int> omega_q(tr_->n, 1.0);
+
+    // Save addresses of rows for CSR and columns for CSC
+    mf_int u_current = -1;
+    mf_int v_current = -1;
+    for (long i = 0; i < tr_->nnz; ++i)
+    {
+        mf_node* N = nullptr;
+
+        // Deal with CSR format
+        N = tr_csr->R + i;
+        // Since tr_csr has been sorted by index u, seeing a larger index 
+        // implies a new row. Assume a node is encoded a tuple of (u, v, r),
+        // where u is row index, v is column index, and r is entry value.
+        // The nodes in tr_csr->R could be
+        //   (0, 1, 0.5), (0, 2, 3.7), (0, 4, -1.2), (2, 0, 1.2), (2, 4, 2.5) 
+        // Then, we can see the first element of the 3rd row (indexed by 2)
+        // is (2, 0, 1.2), which is the 4th element in tr_csr->R. Note that
+        // we use the row pointer of the next non-empty row as the pointers
+        // of empty rows. That is,
+        //   ptrs[0] = pointer of (0, 1, 0.5)
+        //   ptrs[1] = pointer of (0, 2, 1.5)
+        //   ptrs[2] = pointer of (0, 2, 1.5)
+        if (N->u > u_current)
+        {
+            for (mf_int u_passed = u_current + 1; u_passed <= N->u; ++u_passed)
+                ptrs_u[u_passed] = tr_csr->R + i;
+            u_current = N->u;
+        }
+
+        // Deal with CSC format
+        N = tr_csc->R + i;
+        if (N->v > v_current)
+        {
+            for (mf_int v_passed = v_current + 1; v_passed <= N->v; ++v_passed)
+                ptrs_v[v_passed] = tr_csc->R + i;
+            v_current = N->v;
+        }
+
+    }
+    // The bound of the last row. It's the address one-element behind the last
+    // matrix entry.
+    ptrs_u[tr_->m] = tr_csr->R + tr_csr->nnz;
+    // The bound of the last column.
+    ptrs_v[tr_->n] = tr_csc->R + tr_csc->nnz;
+
+
+    model = shared_ptr<mf_model>(Utility::init_model(tr_->m, tr_->n, param.k),
+                [] (mf_model *ptr) { mf_destroy_model(&ptr); });
+
+    ccd_one_class_core(util, tr_csr, tr_csc, va, param, ptrs_u, ptrs_v, omega_p, omega_q, model);
+}
+catch(exception const &e)
+{
+    cerr << e.what() << endl;
+    throw;
+}
+    return model;
+}
+
 bool check_parameter(mf_parameter param)
 {
     if(param.fun != P_L2_MFR &&
@@ -3126,7 +3884,8 @@ bool check_parameter(mf_parameter param)
        param.fun != P_L2_MFC &&
        param.fun != P_L1_MFC &&
        param.fun != P_ROW_BPR_MFOC &&
-       param.fun != P_COL_BPR_MFOC)
+       param.fun != P_COL_BPR_MFOC &&
+       param.fun != P_L2_MFOC)
     {
         cerr << "unknown loss function" << endl;
         return false;
@@ -3183,6 +3942,17 @@ bool check_parameter(mf_parameter param)
     {
         cerr << "Warning: insufficient blocks may slow down the training"
              << "process (4*nr_threads^2+1 blocks is suggested)" << endl;
+    }
+
+    if(param.nr_bins <= 2*param.nr_threads)
+    {
+        cerr << "Warning: insufficient blocks may slow down the training"
+             << "process (4*nr_threads^2+1 blocks is suggested)" << endl;
+    }
+
+    if(param.alpha < 0)
+    {
+        cerr << "alpha must be a non-negative number" << endl;
     }
 
     return true;
@@ -3317,7 +4087,14 @@ mf_model* mf_train_with_validation(
     if(!check_parameter(param))
         return nullptr;
 
-    shared_ptr<mf_model> model = fpsg(tr, va, param);
+    shared_ptr<mf_model> model(nullptr);
+    
+    if (param.fun != P_L2_MFOC)
+        // Use stochastic gradient method
+        model = fpsg(tr, va, param);
+    else
+        // Use coordinate descent method
+        model = ccd_one_class(tr, va, param); 
 
     mf_model *model_ret = new mf_model;
 
@@ -3343,6 +4120,10 @@ mf_model* mf_train_with_validation_on_disk(
 {
     if(!check_parameter(param))
         return nullptr;
+
+    if(param.fun == P_L2_MFOC)
+        throw invalid_argument("One-class matrix facotorization with L2 "
+                "loss (-f 12) doesn't support disk-level training.");
 
     shared_ptr<mf_model> model = fpsg_on_disk(
         string(tr_path), string(va_path), param);
@@ -3382,6 +4163,10 @@ mf_double mf_cross_validation(
     if(!check_parameter(param))
         return 0;
 
+    if(param.fun == P_L2_MFOC)
+        throw invalid_argument("One-class matrix facotorization with L2 "
+                "loss (-f 12) doesn't support disk-level training.");
+
     CrossValidator validator(param, nr_folds, prob);
 
     return validator.do_cross_validation();
@@ -3394,6 +4179,10 @@ mf_double mf_cross_validation_on_disk(
 {
     if(!check_parameter(param))
         return 0;
+
+    if(param.fun == P_L2_MFOC)
+        throw invalid_argument("One-class matrix facotorization with L2 "
+                "loss (-f 12) doesn't support disk-level training.");
 
     CrossValidatorOnDisk validator(param, nr_folds, string(prob));
 
@@ -3804,6 +4593,8 @@ mf_parameter mf_get_default_param()
     param.lambda_p2 = 0.1f;
     param.lambda_q2 = 0.1f;
     param.eta = 0.1f;
+    param.alpha = 1.0f;
+    param.c = 0.0001f;
     param.do_nmf = false;
     param.quiet = false;
     param.copy_data = true;
