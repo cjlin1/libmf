@@ -2307,24 +2307,20 @@ void BPRSolver::sg_update(mf_int d_begin, mf_int d_end, __m128 XMMz,
     }
 
     // Update learning rate of latent vector p. Squared derivatives along all
-    // latent dimensions will be computed first. Then, their average will be
+    // latent dimensions will be computed above. Here their average will be
     // added into the associated squared-gradient sum.
     __m128 XMMtmp = _mm_add_ps(XMMpG1, _mm_movehl_ps(XMMpG1, XMMpG1));
     XMMpG1 = _mm_add_ps(XMMpG1, _mm_shuffle_ps(XMMtmp, XMMtmp, 1));
     XMMpG = _mm_add_ps(XMMpG, _mm_mul_ps(XMMpG1, XMMrk));
     _mm_store_ss(pG, XMMpG);
 
-    // Update learning rate of latent vector q. Squared derivatives along all
-    // latent dimensions will be computed first. Then, their average will be
-    // added into the associated squared-gradient sum.
+    // Similar code is used to update learning rate of latent vector q.
     XMMtmp = _mm_add_ps(XMMqG1, _mm_movehl_ps(XMMqG1, XMMqG1));
     XMMqG1 = _mm_add_ps(XMMqG1, _mm_shuffle_ps(XMMtmp, XMMtmp, 1));
     XMMqG = _mm_add_ps(XMMqG, _mm_mul_ps(XMMqG1, XMMrk));
     _mm_store_ss(qG, XMMqG);
 
-    // Update learning rate of latent vector w. Squared derivatives along all
-    // latent dimensions will be computed first. Then, their average will be
-    // added into the associated squared-gradient sum.
+    // Similar code is used to update learning rate of latent vector w.
     XMMtmp = _mm_add_ps(XMMwG1, _mm_movehl_ps(XMMwG1, XMMwG1));
     XMMwG1 = _mm_add_ps(XMMwG1, _mm_shuffle_ps(XMMtmp, XMMtmp, 1));
     XMMwG = _mm_add_ps(XMMwG, _mm_mul_ps(XMMwG1, XMMrk));
