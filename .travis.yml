@@ -3,7 +3,6 @@ sudo: required
 language: cpp
 
 install:
-    - sudo apt install libomp-dev
     - make -e
 
 matrix:
