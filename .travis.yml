@@ -1,6 +1,6 @@
-language: cpp
-
+dist: trusty
 sudo: required
+language: cpp
 
 install:
     - sudo apt install libomp-dev
