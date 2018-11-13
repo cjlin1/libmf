@@ -4,11 +4,11 @@ language: cpp
 install:
     - make -e
 
-matrix:
-    - env: DFLAG="-DUSESSE -DUSEOMP"
-    - env: DFLAG="-DUSEAVX -DUSEOMP"
-    - env: DFLAG="-DUSEOMP"
-    - env: DFLAG=""
+env:
+    - DFLAG="-DUSESSE -DUSEOMP"
+    - DFLAG="-DUSEAVX -DUSEOMP"
+    - DFLAG="-DUSEOMP"
+    - DFLAG=""
 
 script:
     - cd demo && sh demo.sh
