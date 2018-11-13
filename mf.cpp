@@ -3476,6 +3476,9 @@ void ccd_one_class_core(
                 // \tilde{b} = \sum_{v=1}^n \bar{b}_v^2
                 mf_double b_hat = 0.0;
                 mf_double b_tilde = 0.0;
+#if defined USEOMP
+#pragma omp parallel for num_threads(util.get_thread_number()) schedule(static) reduction(+:b_hat,b_tilde)
+#endif
                 for (mf_int v = 0; v < n; ++v)
                 {
                     const mf_double &b_v = b[v]; 
@@ -3488,9 +3491,15 @@ void ccd_one_class_core(
                 vector<mf_double> s(d, 0.0); 
                 for (mf_int k1 = 0; k1 < d; ++k1)
                 {
+                    // Buffer variable for using OpenMP
+                    mf_double s_k1 = 0;
                     const mf_float *Q_k1 = Q + k1 * n;
+#if defined USEOMP
+#pragma omp parallel for num_threads(util.get_thread_number()) schedule(static) reduction(+:s_k1)
+#endif
                     for (mf_int v = 0; v < n; ++v)
-                        s[k1] += Q_k1[v] * b[v];
+                        s_k1 += Q_k1[v] * b[v];
+                    s[k1] = s_k1;
                 }
 
                 // Solve a's sub-problem
@@ -3538,6 +3547,9 @@ void ccd_one_class_core(
                 // \tilde{a} = \sum_{u=1}^m \bar{a}_u^2
                 mf_double a_hat = 0.0;
                 mf_double a_tilde = 0.0;
+#if defined USEOMP
+#pragma omp parallel for num_threads(util.get_thread_number()) schedule(static) reduction(+:a_hat,a_tilde)
+#endif
                 for (mf_int u = 0; u < m; ++u)
                 {
                     const mf_float &a_u = a[u];
@@ -3550,9 +3562,15 @@ void ccd_one_class_core(
                 vector<mf_double> t(d, 0.0);
                 for (mf_int k1 = 0; k1 < d; ++k1)
                 {
+                    // Declare buffer variable for using OpenMP
+                    mf_double t_k1 = 0;
                     const mf_float *P_k1 = P + k1 * m;
+#if defined USEOMP
+#pragma omp parallel for num_threads(util.get_thread_number()) schedule(static) reduction(+:t_k1)
+#endif
                     for (mf_int u = 0; u < m; ++u)
-                        t[k1] += P_k1[u] * a[u];
+                        t_k1 += P_k1[u] * a[u];
+                    t[k1] = t_k1;
                 }
 
 #if defined USEOMP
@@ -3594,26 +3612,33 @@ void ccd_one_class_core(
                 ///////////////////////////////////////////////////////////////
                 // Update prediction error in CSR format
                 // \bar{r}_{uv} <- \bar{r}_{uv} - \bar_{p}_{ku}*\bar_{q}_{kv} + a_u*b_v
+#if defined USEOMP
+#pragma omp parallel for num_threads(util.get_thread_number()) schedule(static)
+#endif
                 for (mf_long i = 0; i < tr_csr->nnz; ++i)
                 {
-                    mf_node *ptr = tr_csr->R + i;
-                    const mf_int &u = ptr->u;
-                    const mf_int &v = ptr->v;
-                    ptr->r += a[u] * b[v] - P_k[u] * Q_k[v];
+                    // Update prediction values of positive entries in CSR
+                    mf_node *csr_ptr = tr_csr->R + i;
+                    const mf_int &u_csr = csr_ptr->u;
+                    const mf_int &v_csr = csr_ptr->v;
+                    csr_ptr->r += a[u_csr] * b[v_csr] - P_k[u_csr] * Q_k[v_csr];
+
+                    // Update prediction values of positive entries in CSC
+                    mf_node *csc_ptr = tr_csc->R + i;
+                    const mf_int &u_csc = csc_ptr->u;
+                    const mf_int &v_csc = csc_ptr->v;
+                    csc_ptr->r += a[u_csc] * b[v_csc] - P_k[u_csc] * Q_k[v_csc];
                 }
 
-                // Update prediction error in CSC format
-                for (mf_long i = 0; i < tr_csr->nnz; ++i)
-                {
-                    mf_node *ptr = tr_csc->R + i;
-                    const mf_int &u = ptr->u;
-                    const mf_int &v = ptr->v;
-                    ptr->r += a[u] * b[v] - P_k[u] * Q_k[v];
-                }
-
+#if defined USEOMP
+#pragma omp parallel for num_threads(util.get_thread_number()) schedule(static)
+#endif
                 // Update P_k and Q_k
                 for (mf_int u = 0; u < m; ++u)
                     P_k[u] = a[u];
+#if defined USEOMP
+#pragma omp parallel for num_threads(util.get_thread_number()) schedule(static)
+#endif
                 for (mf_int v = 0; v < n; ++v)
                     Q_k[v] = b[v];
             }
