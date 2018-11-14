@@ -192,6 +192,7 @@ mf_int Scheduler::get_bpr_job(mf_int first_block, bool is_column_oriented)
 
 void Scheduler::put_job(mf_int block_idx, mf_double loss, mf_double error)
 {
+    // Return the block to the scheduler
     {
         lock_guard<mutex> lock(mtx);
         busy_p_blocks[block_idx/nr_bins] = 0;
@@ -203,9 +204,14 @@ void Scheduler::put_job(mf_int block_idx, mf_double loss, mf_double error)
             (mf_float)counts[block_idx]+distribution(generator);
         pq.emplace(priority, block_idx);
         nr_paused_threads++;
+        // Tell others that a block is available again.
         cond_var.notify_all();
     }
 
+    // Wait if nr_done_jobs (aka the number of processed blocks) is too many
+    // because we want to print out the training status roughly once all blocks
+    // are processed once. This is the only place that a solver thread should
+	// wait for something.
     {
         unique_lock<mutex> lock(mtx);
         cond_var.wait(lock, [&] {
@@ -213,6 +219,7 @@ void Scheduler::put_job(mf_int block_idx, mf_double loss, mf_double error)
         });
     }
 
+    // Nothing is blocking and this thread is going to take another block
     {
         lock_guard<mutex> lock(mtx);
         --nr_paused_threads;
@@ -283,10 +290,15 @@ void Scheduler::wait_for_jobs_done()
 {
     unique_lock<mutex> lock(mtx);
 
-    cond_var.wait(lock, [&] {
-        return nr_done_jobs >= target;
-    });
+	cond_var.wait(lock, [&] {
+		return nr_done_jobs >= target;
+	});
 
+    // Wait all threads to stop. The only reason should be that every thread
+    // realizes that they have processed enough blocks. In the beginning, the
+    // number of paused threads must be 0 so that we can make sure that the
+    // following wait won't be activated before at least a thread processing
+    // one block.
     cond_var.wait(lock, [&] {
         return nr_paused_threads == nr_threads;
     });
@@ -301,8 +313,9 @@ void Scheduler::resume()
 
 void Scheduler::terminate()
 {
-    lock_guard<mutex> lock(mtx);
-    terminated = true;
+	lock_guard<mutex> lock(mtx);
+	terminated = true;
+	cond_var.notify_all();
 }
 
 bool Scheduler::is_terminated()
@@ -442,12 +455,12 @@ public:
 
     static mf_problem* copy_problem(mf_problem const *prob, bool copy_data);
     static vector<mf_int> gen_random_map(mf_int size);
-	// A function use to allocate all aligned float array.
-	// It hides platform-specific function calls.
+    // A function use to allocate all aligned float array.
+    // It hides platform-specific function calls.
     static mf_float* malloc_aligned_float(mf_long size);
-	// A function use to free all aligned float array.
-	// It hides platform-specific function calls.
-	static void free_aligned_float(mf_float* ptr);
+    // A function use to free all aligned float array.
+    // It hides platform-specific function calls.
+    static void free_aligned_float(mf_float* ptr);
     // Initialization function for stochastic gradient method.
     // Factor matrices P and Q are both randomly initialized.
     static mf_model* init_model(mf_int loss, mf_int m, mf_int n,
@@ -949,8 +962,8 @@ void Utility::grid_shuffle_scale_problem_on_disk(
 mf_float* Utility::malloc_aligned_float(mf_long size)
 {
 #ifdef _WIN32
-	// Unfortunately, Visual Studio doesn't want to support the
-	// cross-platform allocation below.
+    // Unfortunately, Visual Studio doesn't want to support the
+    // cross-platform allocation below.
     void *ptr = _aligned_malloc(static_cast<size_t>(size * sizeof(mf_float)),
             kALIGNByte);
 #else
@@ -965,11 +978,11 @@ mf_float* Utility::malloc_aligned_float(mf_long size)
 void Utility::free_aligned_float(mf_float *ptr)
 {
 #ifdef _WIN32
-	// Unfortunately, Visual Studio doesn't want to support the
-	// cross-platform allocation below.
-	_aligned_free(ptr);
+    // Unfortunately, Visual Studio doesn't want to support the
+    // cross-platform allocation below.
+    _aligned_free(ptr);
 #else
-	free(ptr);
+    free(ptr);
 #endif
 }
 
@@ -3001,6 +3014,8 @@ void fpsg_core(
     for(auto &thread : threads)
         thread.join();
 
+    cout << "Joined!" << endl;
+
     if(cv_error != nullptr && cv_blocks.size() > 0)
     {
         mf_long cv_count = 0;
@@ -3751,7 +3766,7 @@ void ccd_one_class_core(
     for (mf_int u = 0; u < m; ++u)
         for (mf_int k = 0; k < d; ++k)
             P_transpose[k + u * d] = P[u + k * m];
-	Utility::free_aligned_float(P);
+    Utility::free_aligned_float(P);
     mf_float *Q_transpose = Utility::malloc_aligned_float((mf_long)n * d);
 #if defined USEOMP
 #pragma omp parallel for num_threads(util.get_thread_number()) schedule(static)
@@ -3759,7 +3774,7 @@ void ccd_one_class_core(
     for (mf_int v = 0; v < n; ++v)
         for (mf_int k = 0; k < d; ++k)
             Q_transpose[k + v * d] = Q[v + k * n];
-	Utility::free_aligned_float(Q);
+    Utility::free_aligned_float(Q);
 
     // Set the passed-in model to the result learned from the given data
     // model is null
@@ -4128,9 +4143,9 @@ mf_model* mf_train_with_validation_on_disk(
     char const *va_path,
     mf_parameter param)
 {
-	// Two conditions lead to empty model. First, any parameter is not in its
-	// supported range. Second, one-class matrix facotorization with L2-loss
-	// (-f 12) doesn't support disk-level training.
+    // Two conditions lead to empty model. First, any parameter is not in its
+    // supported range. Second, one-class matrix facotorization with L2-loss
+    // (-f 12) doesn't support disk-level training.
     if(!check_parameter(param) || param.fun == P_L2_MFOC)
         return nullptr;
 
@@ -4169,9 +4184,9 @@ mf_double mf_cross_validation(
     mf_int nr_folds,
     mf_parameter param)
 {
-	// Two conditions lead to empty model. First, any parameter is not in its
-	// supported range. Second, one-class matrix facotorization with L2-loss
-	// (-f 12) doesn't support disk-level training.
+    // Two conditions lead to empty model. First, any parameter is not in its
+    // supported range. Second, one-class matrix facotorization with L2-loss
+    // (-f 12) doesn't support disk-level training.
     if(!check_parameter(param) || param.fun == P_L2_MFOC)
         return 0;
 
@@ -4185,9 +4200,9 @@ mf_double mf_cross_validation_on_disk(
     mf_int nr_folds,
     mf_parameter param)
 {
-	// Two conditions lead to empty model. First, any parameter is not in its
-	// supported range. Second, one-class matrix facotorization with L2-loss
-	// (-f 12) doesn't support disk-level training.
+    // Two conditions lead to empty model. First, any parameter is not in its
+    // supported range. Second, one-class matrix facotorization with L2-loss
+    // (-f 12) doesn't support disk-level training.
     if(!check_parameter(param) || param.fun == P_L2_MFOC)
         return 0;
 
@@ -4338,7 +4353,7 @@ void mf_destroy_model(mf_model **model)
     if(model == nullptr || *model == nullptr)
         return;
     Utility::free_aligned_float((*model)->P);
-	Utility::free_aligned_float((*model)->Q);
+    Utility::free_aligned_float((*model)->Q);
     delete *model;
     *model = nullptr;
 }
