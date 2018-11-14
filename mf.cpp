@@ -3010,7 +3010,7 @@ void fpsg_core(
 
         if(iter == 0)
             slow_only = false;
-		if(iter == param.nr_iters)
+		if(iter == param.nr_iters - 1)
 			sched.terminate();
         sched.resume();
     }
