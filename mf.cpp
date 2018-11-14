@@ -3017,9 +3017,10 @@ void fpsg_core(
 
         sched.resume();
     }
+    cout << "Pre-terminate!" << endl;
     sched.terminate();
     
-    cout << "Post-join!" << endl;
+    cout << "Pre-join!" << endl;
 
     for(auto &thread : threads)
         thread.join();
