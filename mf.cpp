@@ -313,17 +313,8 @@ void Scheduler::resume()
 
 void Scheduler::terminate()
 {
-    {
-        lock_guard<mutex> lock(mtx);
-        terminated = true;
-    }
-
-    while (true)
-    {
-        lock_guard<mutex> lock(mtx);
-        if (nr_paused_threads == 0)
-            break;
-    }
+    lock_guard<mutex> lock(mtx);
+    terminated = true;
 }
 
 bool Scheduler::is_terminated()
