@@ -142,8 +142,8 @@ mf_int Scheduler::get_job()
             }
         }
 
-        for(auto &block : locked_blocks)
-            pq.push(block);
+        for(auto &block1 : locked_blocks)
+            pq.push(block1);
     }
 
     return block.second;
@@ -951,7 +951,8 @@ mf_float* Utility::malloc_aligned_float(mf_long size)
 #ifdef _WIN32
 	// Unfortunately, Visual Studio doesn't want to support the
 	// cross-platform allocation below.
-    void *ptr = _aligned_malloc(size*sizeof(mf_float), kALIGNByte);
+    void *ptr = _aligned_malloc(static_cast<size_t>(size * sizeof(mf_float)),
+            kALIGNByte);
 #else
     void *ptr = aligned_alloc(kALIGNByte, size*sizeof(mf_float));
 #endif
@@ -1009,11 +1010,12 @@ mf_model* Utility::init_model(mf_int fun,
 
     auto init1 = [&](mf_float *start_ptr, mf_long size, vector<mf_int> counts)
     {
-        memset(start_ptr, 0, sizeof(mf_float)*size*model->k);
+        memset(start_ptr, 0, static_cast<size_t>(
+                    sizeof(mf_float) * size*model->k));
         for(mf_long i = 0; i < size; i++)
         {
             mf_float * ptr = start_ptr + i*model->k;
-            if(counts[i] > 0)
+            if(counts[i] > static_cast<mf_long>(0))
                 for(mf_long d = 0; d < k_real; d++, ptr++)
                     *ptr = (mf_float)(distribution(generator)*scale);
             else
@@ -3347,8 +3349,6 @@ void ccd_one_class_core(
     const mf_parameter param,
     const vector<mf_node*> &ptrs_u,
     const vector<mf_node*> &ptrs_v,
-    const vector<mf_int> &omega_p,
-    const vector<mf_int> &omega_q,
     shared_ptr<mf_model> &model)
 {
     // Check problems stored in CSR and CSC formats
@@ -3774,9 +3774,7 @@ void ccd_one_class_core(
 shared_ptr<mf_model> ccd_one_class(
     mf_problem const *tr_,
     mf_problem const *va_,
-    mf_parameter param,
-    vector<mf_int> cv_blocks=vector<mf_int>(),
-    mf_double *cv_error=nullptr)
+    mf_parameter param)
 {
     shared_ptr<mf_model> model;
 try
@@ -3829,17 +3827,6 @@ try
     sort(tr_csr->R, tr_csr->R+tr_csr->nnz, sort_node_by_p());
     sort(tr_csc->R, tr_csc->R+tr_csc->nnz, sort_node_by_q());
 
-
-    // The frequency table of row indexes. The u-th element will be used to
-    // scale the regularization coefficient of the u-th column in P. That is,
-    // the effective regularization coefficient of the u-th column is
-    // lambda_p2 * omega_p[u].
-    vector<mf_int> omega_p(tr_->m, 1.0);
-
-    // The frequency table of column indexes. Similar to omega_p, this vector
-    // stores the scaling factors for columns in Q. 
-    vector<mf_int> omega_q(tr_->n, 1.0);
-
     // Save addresses of rows for CSR and columns for CSC
     mf_int u_current = -1;
     mf_int v_current = -1;
@@ -3888,7 +3875,7 @@ try
     model = shared_ptr<mf_model>(Utility::init_model(tr_->m, tr_->n, param.k),
                 [] (mf_model *ptr) { mf_destroy_model(&ptr); });
 
-    ccd_one_class_core(util, tr_csr, tr_csc, va, param, ptrs_u, ptrs_v, omega_p, omega_q, model);
+    ccd_one_class_core(util, tr_csr, tr_csc, va, param, ptrs_u, ptrs_v, model);
 }
 catch(exception const &e)
 {

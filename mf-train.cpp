@@ -181,7 +181,7 @@ Option parse_option(int argc, char **argv)
 
             if(!is_numerical(argv[i]))
                 throw invalid_argument("-a should be followed by a number");
-            option.param.alpha = atof(argv[i]);
+            option.param.alpha = static_cast<mf_float>(atof(argv[i]));
         }
         else if(args[i].compare("-c") == 0)
         {
@@ -196,10 +196,10 @@ Option parse_option(int argc, char **argv)
             if (argv[i][0] == '-')
                 // Negative number starts with - but atof only recognize numbers.
                 // Thus, we pass all but the first symbol to atof.
-                option.param.c = -atof(argv[i] + 1);
+                option.param.c = -static_cast<mf_float>(atof(argv[i] + 1));
             else
                 // Non-negative numbers such as 0 and 0.5 can be handled by atof.
-                option.param.c = atof(argv[i]);
+                option.param.c = static_cast<mf_float>(atof(argv[i]));
         }
         else if(args[i].compare("-p") == 0)
         {
