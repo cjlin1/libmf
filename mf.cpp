@@ -211,7 +211,7 @@ void Scheduler::put_job(mf_int block_idx, mf_double loss, mf_double error)
     // Wait if nr_done_jobs (aka the number of processed blocks) is too many
     // because we want to print out the training status roughly once all blocks
     // are processed once. This is the only place that a solver thread should
-	// wait for something.
+    // wait for something.
     {
         unique_lock<mutex> lock(mtx);
         cond_var.wait(lock, [&] {
@@ -290,9 +290,9 @@ void Scheduler::wait_for_jobs_done()
 {
     unique_lock<mutex> lock(mtx);
 
-	cond_var.wait(lock, [&] {
-		return nr_done_jobs >= target;
-	});
+    cond_var.wait(lock, [&] {
+        return nr_done_jobs >= target;
+    });
 
     // Wait all threads to stop. The only reason should be that every thread
     // realizes that they have processed enough blocks. In the beginning, the
@@ -313,9 +313,17 @@ void Scheduler::resume()
 
 void Scheduler::terminate()
 {
-	lock_guard<mutex> lock(mtx);
-	terminated = true;
-	cond_var.notify_all();
+    {
+        lock_guard<mutex> lock(mtx);
+        terminated = true;
+    }
+
+    while (true)
+    {
+        lock_guard<mutex> lock(mtx);
+        if (nr_paused_threads == 0)
+            break;
+    }
 }
 
 bool Scheduler::is_terminated()
