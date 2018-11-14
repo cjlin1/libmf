@@ -295,15 +295,18 @@ void Scheduler::wait_for_jobs_done()
 {
     unique_lock<mutex> lock(mtx);
 
+    // The first thing the main thread should wait for is that solver threads
+    // process enough matrix blocks.
+    // [REVIEW] Is it really needed? Solver threads automatically stop if they
+    // process too many blocks, so the next wait should be enough for stopping
+    // the main thread when nr_done_job is not enough.
     cond_var.wait(lock, [&] {
         return nr_done_jobs >= target;
     });
 
-    // Wait all threads to stop. The only reason should be that every thread
-    // realizes that they have processed enough blocks. In the beginning, the
-    // number of paused threads must be 0 so that we can make sure that the
-    // following wait won't be activated before at least a thread processing
-    // one block.
+    // Wait for all threads to stop. Once a thread realizes that all threads
+    // have processed enough blocks it should stop. Then, the main thread can
+    // print values safely.
     cond_var.wait(lock, [&] {
         return nr_paused_threads == nr_threads;
     });
@@ -3010,15 +3013,13 @@ void fpsg_core(
 
         if(iter == 0)
             slow_only = false;
-		if(iter == param.nr_iters - 1)
-			sched.terminate();
+        if(iter == param.nr_iters - 1)
+            sched.terminate();
         sched.resume();
     }
     
     for(auto &thread : threads)
         thread.join();
-
-    cout << "Joined!" << endl;
 
     if(cv_error != nullptr && cv_blocks.size() > 0)
     {
