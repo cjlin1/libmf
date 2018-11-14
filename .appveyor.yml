@@ -1,0 +1,21 @@
+image: Visual Studio 2017
+platform: x64
+configuration: Release
+
+enviroment:
+    matrix:
+        - DFLAG: "-DUSESSE -DUSEOMP"
+
+        - DFLAG: "-DUSEAVX -DUSEOMP"
+
+        - DFLAG: "-DUSEOMP"
+
+        - DFLAG: ""
+
+install: 
+    - cmd: namke -f Makefile.win all
+
+build: off
+
+test_script:
+    - cd demo && demo.bat
