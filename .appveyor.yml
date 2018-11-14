@@ -1,0 +1,22 @@
+image: Visual Studio 2017
+platform: x64
+configuration: Release
+
+environment:
+    matrix:
+        - DFLAG: "-DUSESSE -DUSEOMP"
+
+        - DFLAG: "-DUSEAVX -DUSEOMP"
+
+        - DFLAG: "-DUSEOMP"
+
+        - DFLAG: ""
+
+install: 
+    - call "C:\Program Files (x86)\Microsoft Visual Studio\2017\Community\VC\Auxiliary\Build\vcvars64.bat"
+    - cmd: nmake -f Makefile.win all
+
+build: off
+
+test_script:
+    - cd demo && demo.bat
