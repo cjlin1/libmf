@@ -442,7 +442,12 @@ public:
 
     static mf_problem* copy_problem(mf_problem const *prob, bool copy_data);
     static vector<mf_int> gen_random_map(mf_int size);
+	// A function use to allocate all aligned float array.
+	// It hides platform-specific function calls.
     static mf_float* malloc_aligned_float(mf_long size);
+	// A function use to free all aligned float array.
+	// It hides platform-specific function calls.
+	static void free_aligned_float(mf_float* ptr);
     // Initialization function for stochastic gradient method.
     // Factor matrices P and Q are both randomly initialized.
     static mf_model* init_model(mf_int loss, mf_int m, mf_int n,
@@ -943,11 +948,28 @@ void Utility::grid_shuffle_scale_problem_on_disk(
 
 mf_float* Utility::malloc_aligned_float(mf_long size)
 {
+#ifdef _WIN32
+	// Unfortunately, Visual Studio doesn't want to support the
+	// cross-platform allocation below.
+    void *ptr = _aligned_malloc(size*sizeof(mf_float), kALIGNByte);
+#else
     void *ptr = aligned_alloc(kALIGNByte, size*sizeof(mf_float));
+#endif
     if(ptr == nullptr)
         throw bad_alloc();
 
     return (mf_float*)ptr;
+}
+
+void Utility::free_aligned_float(mf_float *ptr)
+{
+#ifdef _WIN32
+	// Unfortunately, Visual Studio doesn't want to support the
+	// cross-platform allocation below.
+	_aligned_free(ptr);
+#else
+	free(ptr);
+#endif
 }
 
 mf_model* Utility::init_model(mf_int fun,
@@ -3721,22 +3743,23 @@ void ccd_one_class_core(
 
     // Transpose P and Q. Note that the format of P and Q here are different
     // than that for mf_model.
-    mf_float *P_transpose = new mf_float[m * d];
+
+    mf_float *P_transpose = Utility::malloc_aligned_float((mf_long)m * d);
 #if defined USEOMP
 #pragma omp parallel for num_threads(util.get_thread_number()) schedule(static)
 #endif
     for (mf_int u = 0; u < m; ++u)
         for (mf_int k = 0; k < d; ++k)
             P_transpose[k + u * d] = P[u + k * m];
-    delete[] P;
-    mf_float *Q_transpose = new mf_float[n * d];
+	Utility::free_aligned_float(P);
+    mf_float *Q_transpose = Utility::malloc_aligned_float((mf_long)n * d);
 #if defined USEOMP
 #pragma omp parallel for num_threads(util.get_thread_number()) schedule(static)
 #endif
     for (mf_int v = 0; v < n; ++v)
         for (mf_int k = 0; k < d; ++k)
             Q_transpose[k + v * d] = Q[v + k * n];
-    delete[] Q;
+	Utility::free_aligned_float(Q);
 
     // Set the passed-in model to the result learned from the given data
     // model is null
@@ -4118,12 +4141,11 @@ mf_model* mf_train_with_validation_on_disk(
     char const *va_path,
     mf_parameter param)
 {
-    if(!check_parameter(param))
+	// Two conditions lead to empty model. First, any parameter is not in its
+	// supported range. Second, one-class matrix facotorization with L2-loss
+	// (-f 12) doesn't support disk-level training.
+    if(!check_parameter(param) || param.fun == P_L2_MFOC)
         return nullptr;
-
-    if(param.fun == P_L2_MFOC)
-        throw invalid_argument("One-class matrix facotorization with L2 "
-                "loss (-f 12) doesn't support disk-level training.");
 
     shared_ptr<mf_model> model = fpsg_on_disk(
         string(tr_path), string(va_path), param);
@@ -4160,12 +4182,11 @@ mf_double mf_cross_validation(
     mf_int nr_folds,
     mf_parameter param)
 {
-    if(!check_parameter(param))
+	// Two conditions lead to empty model. First, any parameter is not in its
+	// supported range. Second, one-class matrix facotorization with L2-loss
+	// (-f 12) doesn't support disk-level training.
+    if(!check_parameter(param) || param.fun == P_L2_MFOC)
         return 0;
-
-    if(param.fun == P_L2_MFOC)
-        throw invalid_argument("One-class matrix facotorization with L2 "
-                "loss (-f 12) doesn't support disk-level training.");
 
     CrossValidator validator(param, nr_folds, prob);
 
@@ -4177,12 +4198,11 @@ mf_double mf_cross_validation_on_disk(
     mf_int nr_folds,
     mf_parameter param)
 {
-    if(!check_parameter(param))
+	// Two conditions lead to empty model. First, any parameter is not in its
+	// supported range. Second, one-class matrix facotorization with L2-loss
+	// (-f 12) doesn't support disk-level training.
+    if(!check_parameter(param) || param.fun == P_L2_MFOC)
         return 0;
-
-    if(param.fun == P_L2_MFOC)
-        throw invalid_argument("One-class matrix facotorization with L2 "
-                "loss (-f 12) doesn't support disk-level training.");
 
     CrossValidatorOnDisk validator(param, nr_folds, string(prob));
 
@@ -4330,8 +4350,8 @@ void mf_destroy_model(mf_model **model)
 {
     if(model == nullptr || *model == nullptr)
         return;
-    free((*model)->P);
-    free((*model)->Q);
+    Utility::free_aligned_float((*model)->P);
+	Utility::free_aligned_float((*model)->Q);
     delete *model;
     *model = nullptr;
 }

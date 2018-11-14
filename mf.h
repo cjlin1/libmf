@@ -1,6 +1,7 @@
 #ifndef _LIBMF_H
 #define _LIBMF_H
 
+#include <string>
 #include <utility>
 
 #ifdef __cplusplus
