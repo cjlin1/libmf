@@ -13,9 +13,10 @@ environment:
         - DFLAG: ""
 
 install: 
-    - cmd: nmake -f Makefile.win all
+    - cmd: C:\Program Files (x86)\Microsoft Visual Studio\2017\Community\VC\Auxiliary\Build\vcvars64.bat
 
-build: off
+build:
+    - cmd: nmake -f Makefile.win all
 
 test_script:
     - cd demo && demo.bat
