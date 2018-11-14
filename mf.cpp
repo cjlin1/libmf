@@ -3018,6 +3018,8 @@ void fpsg_core(
         sched.resume();
     }
     sched.terminate();
+    
+    cout << "Post-join!" << endl;
 
     for(auto &thread : threads)
         thread.join();
