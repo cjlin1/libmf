@@ -14,9 +14,9 @@ environment:
 
 install: 
     - cmd: C:\Program Files (x86)\Microsoft Visual Studio\2017\Community\VC\Auxiliary\Build\vcvars64.bat
-
-build:
     - cmd: nmake -f Makefile.win all
+
+build: off
 
 test_script:
     - cd demo && demo.bat
