@@ -2,7 +2,7 @@ image: Visual Studio 2017
 platform: x64
 configuration: Release
 
-enviroment:
+environment:
     matrix:
         - DFLAG: "-DUSESSE -DUSEOMP"
 
