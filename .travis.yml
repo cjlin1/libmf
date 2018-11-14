@@ -1,0 +1,14 @@
+dist: trusty
+language: cpp
+
+install:
+    - make -e
+
+env:
+    - DFLAG="-DUSESSE -DUSEOMP"
+    - DFLAG="-DUSEAVX -DUSEOMP"
+    - DFLAG="-DUSEOMP"
+    - DFLAG=""
+
+script:
+    - cd demo && sh demo.sh
