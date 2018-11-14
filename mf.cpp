@@ -62,11 +62,6 @@ public:
     void resume();
     void terminate();
     bool is_terminated();
-    void print_nr_paused_thread()
-    {
-        lock_guard<mutex> lock(mtx);
-        cout << nr_paused_threads << endl;
-    };
 
 private:
     mf_int nr_bins;
@@ -197,7 +192,7 @@ mf_int Scheduler::get_bpr_job(mf_int first_block, bool is_column_oriented)
 
 void Scheduler::put_job(mf_int block_idx, mf_double loss, mf_double error)
 {
-    // Return the block to the scheduler
+    // Return the held block to the scheduler
     {
         lock_guard<mutex> lock(mtx);
         busy_p_blocks[block_idx/nr_bins] = 0;
@@ -462,10 +457,12 @@ public:
 
     static mf_problem* copy_problem(mf_problem const *prob, bool copy_data);
     static vector<mf_int> gen_random_map(mf_int size);
-    // A function use to allocate all aligned float array.
-    // It hides platform-specific function calls.
+    // A function used to allocate all aligned float array.
+    // It hides platform-specific function calls. Memory
+    // allocated by malloc_aligned_float must be freed by using
+    // free_aligned_float.
     static mf_float* malloc_aligned_float(mf_long size);
-    // A function use to free all aligned float array.
+    // A function used to free all aligned float array.
     // It hides platform-specific function calls.
     static void free_aligned_float(mf_float* ptr);
     // Initialization function for stochastic gradient method.

@@ -27,7 +27,6 @@ mf-predict: mf-predict.cpp mf.o
 	$(CXX) $(CXXFLAGS) $(DFLAG) -o $@ $^
 
 mf.o: mf.cpp mf.h
-	echo $(DFLAG)
 	$(CXX) $(CXXFLAGS) $(DFLAG) -c -fPIC -o $@ $<
 
 clean:
