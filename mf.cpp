@@ -62,6 +62,11 @@ public:
     void resume();
     void terminate();
     bool is_terminated();
+    void print_nr_paused_thread()
+    {
+        lock_guard<mutex> lock(mtx);
+        cout << nr_paused_threads << endl;
+    };
 
 private:
     mf_int nr_bins;
@@ -3012,6 +3017,7 @@ void fpsg_core(
     sched.terminate();
     
     cout << "Pre-join!" << endl;
+    sched.print_nr_paused_thread();
 
     for(auto &thread : threads)
         thread.join();
