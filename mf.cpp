@@ -3010,15 +3010,11 @@ void fpsg_core(
 
         if(iter == 0)
             slow_only = false;
-
+		if(iter == param.nr_iters)
+			sched.terminate();
         sched.resume();
     }
-    cout << "Pre-terminate!" << endl;
-    sched.terminate();
     
-    cout << "Pre-join!" << endl;
-    sched.print_nr_paused_thread();
-
     for(auto &thread : threads)
         thread.join();
 
