@@ -3,13 +3,16 @@ CFLAGS = /W4 /nologo /O2 /EHsc /D "_CRT_SECURE_NO_DEPRECATE"
 
 # Choose one instruction set to accelerate LIBMF
 # 1. use SSE
-CFLAGS = $(CFLAGS) /D "USESSE"
+CPUSET = /D "USESSE"
 # 2. use AVX
-#CFLAGS = $(CFLAGS) /D "USEAVX" /arch:AVX
+#CPUSET = /D "USEAVX" /arch:AVX
 # 3. no acceleration
-#CFLAGS = $(CFLAGS)
+#CPUSET =
 
-CFLAGS = $(CFLAGS) /D "USEOMP" /openmp
+# Always use OpenMP because Visual Studio supports it.
+CFLAGS = $(CFLAGS) $(CPUSET) /D "USEOMP" /openmp
+# To disable OpenMP, please use the command below.
+#CFLAGS = $(CFLAGS) $(CPUSET) /D
 
 TARGET = windows
 
