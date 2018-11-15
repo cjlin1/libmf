@@ -4,17 +4,15 @@ configuration: Release
 
 environment:
     matrix:
-        - DFLAG: "-DUSESSE -DUSEOMP"
+        - CPUSET: "/D \"USESSE\""
 
-        - DFLAG: "-DUSEAVX -DUSEOMP"
+        - CPUSET: "/D \"USEAVX\" /arch:AVX"
 
-        - DFLAG: "-DUSEOMP"
-
-        - DFLAG: ""
+        - CPUSET: ""
 
 install: 
     - call "C:\Program Files (x86)\Microsoft Visual Studio\2017\Community\VC\Auxiliary\Build\vcvars64.bat"
-    - cmd: nmake -f Makefile.win all
+    - cmd: nmake /E /F Makefile.win all
 
 build: off
 
