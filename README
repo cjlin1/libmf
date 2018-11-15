@@ -1,5 +1,5 @@
 LIBMF is a library for large-scale sparse matrix factorization. For the
-optimization problem it solves, please refer to [2].
+optimization problem it solves and the overall framework, please refer to [3].
 
 
 
@@ -123,9 +123,13 @@ Command Line Usage
       for one-class matrix factorization
         10 -- row-oriented pair-wise logarithmic loss
         11 -- column-oriented pair-wise logarithmic loss
+        12 -- squared error (L2-norm)
     -k <dimensions>: set number of dimensions (default 8)
     -t <iter>: set number of iterations (default 20)
     -r <eta>: set initial learning rate (default 0.1)
+    -a <alpha>: set coefficient of negative entries' loss (default 1)
+    -c <c>: set value of negative entries (default 0.0001).
+       Every positive entry is assumed to be 1.
     -s <threads>: set number of threads (default 12)
     -n <bins>: set number of bins (may be adjusted by LIBMF for speed)
     -p <path>: set path to the validation set
@@ -137,13 +141,23 @@ Command Line Usage
     `mf-train' is the main training command of LIBMF. At each iteration, the
     following information is printed.
 
-        - iter: the index of iteration
-        - tr_xxxx: xxxx is the evaluation criterion on the training set
-        - va_xxxx: the same criterion on the validation set if `-p' is set
-        - obj: objective function value
+        - iter: the index of iteration.
+        - tr_*: * is the evaluation criterion on the training set.
+        - tr_*+: * is the evaluation criterion on the positive entries in the
+          training set.
+        - tr_*-: * is the evaluation criterion on the negative entries in the
+          training set.
+        - va_*: the same criterion on the validation set if `-p' is set
+        - tr_*+: * is the evaluation criterion on the positive entries in the
+          validation set.
+        - tr_*-: * is the evaluation criterion on the negative entries in the
+          validation set.
+        - obj: objective function value.
+        - reg: regularization term.
 
-    Here `tr_xxxx' and `obj' are estimations because calculating true values
-    can be time-consuming.
+    Here `tr_*' and `obj' are estimations because calculating true values
+    can be time-consuming. Different solvers can print different combinations
+    those values.
 
     For different losses, the criterion to be printed is listed below.
 
@@ -153,7 +167,10 @@ Command Line Usage
         -       2: generalized KL-divergence (KL)
         -       5: logarithmic loss
         -   6 & 7: accuracy
-        - 10 & 11: pair-wise logarithmic loss (BprLoss)
+        - 10 & 11: pair-wise logarithmic loss in Bayesian personalized ranking
+        -      12: sum of squared errors. The label of positive entries is 1
+        -          while negative entries' value is set using command line
+        -          option -c.
 
 -   `mf-predict'
 
@@ -321,33 +338,67 @@ There are four public data structures in LIBMF.
     lambda_q1     coefficient of L1-norm regularization on Q       0
     lambda_q2     coefficient of L2-norm regularization on Q     0.1
     eta           learning rate                                  0.1
+    alpha         importance of negative entries with -f 12      0.1
+    c             desired value of negative entries           0.0001
     do_nmf        perform non-negative MF (NMF)                false
     quiet         no outputs to stdout                         false
     copy_data     copy data in training procedure               true
 
-    In LIBMF, we parallelize the computation by griding the data matrix into
-    nr_bins^2 blocks. According to our experiments, this parameter is not
-    sensitive to both effectiveness and efficiency. In most cases the default
-    value should work well.
+    There are two major algorithm categories in LIBMF. One is for stochastic
+    gradient method and the other one is for coordinate descent method. Both
+    of them support multi-threading. Currently, the only solver used
+    coordinate descent method is implemented for fun=12. All other types of loss
+    functions such as fun=0 may use stochastic gradient method. Notice that
+    when a framework does support the parameters specified, LIBMF may ignore
+    them or throw an error.
 
-    For disk-level training, `nr_bins' controls the memory usage of because
-    one thread accesss an entire block at one time. If `nr_bins' is 4 and
-    `nr_threads' is 1, the expected usage of memory is 25% of the memory to
-    store the whole training matrix.
+    LIBMF's framework for stochastic gradient method:
 
-    Let the training data is a `mf_problem.' By default, at the beginning of
-    the training procedure, the data matrix is copied because it would be
-    modified in the training process. To save memory, `copy_data' can be set to
-    false with the following effects.
+        In LIBMF, we parallelize the computation by griding the data matrix
+        into nr_bins^2 blocks. According to our experiments, this parameter is
+        not sensitive to both effectiveness and efficiency. In most cases the
+        default value should work well.
 
-        (1) The raw data is directly used without being copied.
-        (2) The order of nodes may be changed.
-        (3) The value in each node may become slightly different.
+        For disk-level training, `nr_bins' controls the memory usage of
+        because one thread accesss an entire block at one time. If `nr_bins'
+        is 4 and `nr_threads' is 1, the expected usage of memory is 25% of the
+        memory to store the whole training matrix.
 
-    Note that `copy_data' is invalid for disk-level training.
+        Let the training data is a `mf_problem.' By default, at the beginning
+        of the training procedure, the data matrix is copied because it would
+        be modified in the training process. To save memory, `copy_data' can
+        be set to false with the following effects.
 
-    To obtain a parameter with default values, use the function
-    `get_default_parameter.'
+            (1) The raw data is directly used without being copied.
+            (2) The order of nodes may be changed.
+            (3) The value in each node may become slightly different.
+
+        Note that `copy_data' is invalid for disk-level training.
+
+        To obtain a parameter with default values, use the function
+        `get_default_parameter.'
+
+        Note that parameter alpha and c are not ignored under this framework. 
+
+    LIBMF's framework for coordinate descent method:
+
+        Currently, only one solver is implemented under this framework. It
+        minimizes the squared errors overall the whole training matrix. Its
+        regularization function is Frobenius norm on the two factor matrices
+        P and Q. Note that the the original training matrix R (m-by-n) is
+        approximated by P^TQ. This solver requires two copies of the original
+        positive entries if `copy_data' is false. That is, if your input data is
+        50MB, LIBMF may need 150MB memory in total for data storage. By
+        setting `copy_data' to false, LIBMF will only make one extra copy.
+        Disk-level training is not supported.
+
+        Parameters recognized by this framework are `fun,' `k,' `nr_threads,'
+        `nr_iters,' `lambda_p2,' `lambda_q2,' `alpha,' `c,' `quiet,' and
+        `copy_data.'
+
+        Unlike the standard C++ thread class used in stochastic gradient
+        method's framework, the parallel computation here relies on OpenMP, so
+        please make sure your complier can support it.
 
 
 -   struct mf_model
@@ -362,7 +413,7 @@ There are four public data structures in LIBMF.
     };
 
     `mf_model' is used to store models learned by LIBMF. `fun' indicates the
-    loss funcion of the sovled MF problem. `m' represents the number of rows,
+    loss function of the solved MF problem. `m' represents the number of rows,
     `n' represents the number of columns, `k' represents the number of latent
     factors, and `b' is the average of all elements in the training matrix. `P'
     is used to store a kxm matrix in column oriented format. For example, if
@@ -576,7 +627,7 @@ for Stochastic Gradient Methods to Matrix Factorization. PAKDD, 2015.
 
 [3] W.-S. Chin, B.-W. Yuan, M.-Y. Yang, Y. Zhuang, Y.-C. Juan, and C.-J. Lin.
 LIBMF: A Library for Parallel Matrix Factorization in Shared-memory Systems.
-Technical report, 2015.
+JMLR, 2015.
 (www.csie.ntu.edu.tw/~cjlin/papers/libmf/libmf_open_source.pdf)
 
 For any questions and comments, please email:
