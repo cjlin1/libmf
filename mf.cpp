@@ -371,7 +371,7 @@ public:
     BlockOnDisk() : first(0), last(0), current(0),
                     source_path(""), buffer(0) {};
     bool move_next() { return ++current < last-first; }
-    mf_node* get_current() { return &buffer[current]; }
+    mf_node* get_current() { return &buffer[static_cast<size_t>(current)]; }
     void tie_to(string source_path_, mf_long first_, mf_long last_);
     void reload();
     void free() { buffer.resize(0); };
@@ -398,7 +398,7 @@ void BlockOnDisk::reload()
     if(!source)
         throw runtime_error("can not open "+source_path);
 
-    buffer.resize(last-first);
+    buffer.resize(static_cast<size_t>(last-first));
     source.seekg(first*sizeof(mf_node));
     source.read((char*)buffer.data(), (last-first)*sizeof(mf_node));
     current = -1;
@@ -423,6 +423,16 @@ struct sort_node_by_q
         return tie(lhs.v, lhs.u) < tie(rhs.v, rhs.u);
     }
 };
+
+struct deleter
+{
+    void operator() (mf_problem *prob)
+    {
+        delete[] prob->R;
+        delete prob;
+    }
+};
+
 
 class Utility
 {
@@ -943,7 +953,7 @@ void Utility::grid_shuffle_scale_problem_on_disk(
 
     for(mf_int i = 0; i < nr_bins*nr_bins; i++)
     {
-        vector<mf_node> nodes(counts[i+1]-counts[i]);
+        vector<mf_node> nodes(static_cast<size_t>(counts[i+1]-counts[i]));
         buffer.clear();
         buffer.seekg(counts[i]*sizeof(mf_node));
         buffer.read((char*)nodes.data(), sizeof(mf_node)*nodes.size());
@@ -1032,7 +1042,7 @@ mf_model* Utility::init_model(mf_int fun,
         for(mf_long i = 0; i < size; i++)
         {
             mf_float * ptr = start_ptr + i*model->k;
-            if(counts[i] > static_cast<mf_long>(0))
+            if(counts[static_cast<size_t>(i)] > 0)
                 for(mf_long d = 0; d < k_real; d++, ptr++)
                     *ptr = (mf_float)(distribution(generator)*scale);
             else
@@ -1184,7 +1194,7 @@ mf_problem* Utility::copy_problem(mf_problem const *prob, bool copy_data)
     {
         try
         {
-            new_prob->R = new mf_node[prob->nnz];
+            new_prob->R = new mf_node[static_cast<size_t>(prob->nnz)];
             copy(prob->R, prob->R+prob->nnz, new_prob->R);
         }
         catch(...)
@@ -3072,15 +3082,6 @@ try
 
     if(param.copy_data)
     {
-        struct deleter
-        {
-            void operator() (mf_problem *prob)
-            {
-                delete[] prob->R;
-                delete prob;
-            }
-        };
-
         tr = shared_ptr<mf_problem>(
                 Utility::copy_problem(tr_, true), deleter());
         va = shared_ptr<mf_problem>(
@@ -3809,15 +3810,6 @@ try
 
     if(param.copy_data)
     {
-        struct deleter
-        {
-            void operator() (mf_problem *prob)
-            {
-                delete[] prob->R;
-                delete prob;
-            }
-        };
-
         // Need a row-major and a column-major training formats
         // Thus, two duplicates are made.
         tr_csr = shared_ptr<mf_problem>(
@@ -4232,7 +4224,7 @@ mf_problem read_problem(string path)
     while(getline(f, line))
         prob.nnz++;
 
-    mf_node *R = new mf_node[prob.nnz];
+    mf_node *R = new mf_node[static_cast<size_t>(prob.nnz)];
 
     f.close();
     f.open(path);
