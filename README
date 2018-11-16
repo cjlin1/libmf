@@ -317,6 +317,8 @@ There are four public data structures in LIBMF.
         mf_float lambda_p2;
         mf_float lambda_q1;
         mf_float lambda_q2;
+        mf_float alpha;
+        mf_float c;
         mf_float eta;
         bool do_nmf;
         bool quiet;
@@ -338,7 +340,7 @@ There are four public data structures in LIBMF.
     lambda_q1     coefficient of L1-norm regularization on Q       0
     lambda_q2     coefficient of L2-norm regularization on Q     0.1
     eta           learning rate                                  0.1
-    alpha         importance of negative entries with -f 12      0.1
+    alpha         importance of negative entries                 0.1
     c             desired value of negative entries           0.0001
     do_nmf        perform non-negative MF (NMF)                false
     quiet         no outputs to stdout                         false
