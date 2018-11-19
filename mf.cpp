@@ -975,13 +975,17 @@ void Utility::grid_shuffle_scale_problem_on_disk(
 
 mf_float* Utility::malloc_aligned_float(mf_long size)
 {
+    // [REVIEW] I hope one day we can use C11 aligned_alloc to replace
+    // platform-depedent functions below. Both of Windows and OSX currently
+    // don't support that function.
+    void *ptr = nullptr;
 #ifdef _WIN32
-    // Unfortunately, Visual Studio doesn't want to support the
-    // cross-platform allocation below.
-    void *ptr = _aligned_malloc(static_cast<size_t>(size * sizeof(mf_float)),
+    ptr = _aligned_malloc(static_cast<size_t>(size * sizeof(mf_float)),
             kALIGNByte);
 #else
-    void *ptr = aligned_alloc(kALIGNByte, size*sizeof(mf_float));
+    int status = posix_memalign(&ptr, kALIGNByte, size*sizeof(mf_float));
+        if(status != 0)
+                    throw bad_alloc();
 #endif
     if(ptr == nullptr)
         throw bad_alloc();

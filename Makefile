@@ -1,5 +1,6 @@
 CXX = g++
 CXXFLAGS = -Wall -O3 -pthread -std=c++0x -march=native
+OMPFLAG = -fopenmp
 SHVER = 2
 
 # run `make clean all' if you change the following flags.
@@ -13,7 +14,7 @@ DFLAG = -DUSESSE
 
 # uncomment the following flags if you do not want to use OpenMP
 DFLAG += -DUSEOMP
-CXXFLAGS += -fopenmp
+CXXFLAGS += $(OMPFLAG)
 
 all: mf-train mf-predict
 
