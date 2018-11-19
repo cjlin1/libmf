@@ -1,5 +1,9 @@
-dist: trusty
 language: cpp
+
+matrix:
+    include:
+        - os: linux
+        - os: osx
 
 install:
     - make -e
