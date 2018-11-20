@@ -102,7 +102,7 @@ Scheduler::Scheduler(mf_int nr_bins, mf_int nr_threads,
       cv_blocks(cv_blocks.begin(), cv_blocks.end()),
       distribution(0.0, 1.0)
 {
-    for(mf_int i = 0; i < nr_bins*nr_bins; i++)
+    for(mf_int i = 0; i < nr_bins*nr_bins; ++i)
     {
         if(this->cv_blocks.find(i) == this->cv_blocks.end())
             pq.emplace(distribution(generator), i);
@@ -280,7 +280,7 @@ mf_int Scheduler::get_negative(mf_int first_block, mf_int second_block,
             return rand_val%(v_max-v_min)+v_min;
     };
 
-    if (rand_val % 2)
+    if(rand_val % 2)
         return (mf_int)gen_random(first_block);
     else
         return (mf_int)gen_random(second_block);
@@ -508,7 +508,7 @@ void Utility::collect_info(
 #if defined USEOMP
 #pragma omp parallel for num_threads(nr_threads) schedule(static) reduction(+:ex,ex2)
 #endif
-    for(mf_long i = 0; i < prob.nnz; i++)
+    for(mf_long i = 0; i < prob.nnz; ++i)
     {
         mf_node &N = prob.R[i];
         ex += (mf_double)N.r;
@@ -560,7 +560,7 @@ void Utility::scale_problem(mf_problem &prob, mf_float scale)
 #if defined USEOMP
 #pragma omp parallel for num_threads(nr_threads) schedule(static)
 #endif
-    for(mf_long i = 0; i < prob.nnz; i++)
+    for(mf_long i = 0; i < prob.nnz; ++i)
         prob.R[i].r *= scale;
 }
 
@@ -578,10 +578,10 @@ void Utility::scale_model(mf_model &model, mf_float scale)
 #if defined USEOMP
 #pragma omp parallel for num_threads(nr_threads) schedule(static)
 #endif
-        for(mf_int i = 0; i < size; i++)
+        for(mf_int i = 0; i < size; ++i)
         {
             mf_float *ptr1 = ptr+(mf_long)i*model.k;
-            for(mf_int d = 0; d < k; d++)
+            for(mf_int d = 0; d < k; ++d)
                 ptr1[d] *= factor_scale;
         }
     };
@@ -626,13 +626,13 @@ mf_double Utility::calc_reg1(mf_model &model,
                                vector<mf_int> &omega)
     {
         mf_double reg = 0;
-        for(mf_int i = 0; i < size; i++)
+        for(mf_int i = 0; i < size; ++i)
         {
             if(omega[i] <= 0)
                 continue;
 
             mf_float tmp = 0;
-            for(mf_int j = 0; j < model.k; j++)
+            for(mf_int j = 0; j < model.k; ++j)
                 tmp += abs(ptr[i*model.k+j]);
             reg += omega[i]*tmp;
         }
@@ -654,7 +654,7 @@ mf_double Utility::calc_reg2(mf_model &model,
 #if defined USEOMP
 #pragma omp parallel for num_threads(nr_threads) schedule(static) reduction(+:reg)
 #endif
-        for(mf_int i = 0; i < size; i++)
+        for(mf_int i = 0; i < size; ++i)
         {
             if(omega[i] <= 0)
                 continue;
@@ -682,7 +682,7 @@ mf_double Utility::calc_error(
 #if defined USEOMP
 #pragma omp parallel for num_threads(nr_threads) schedule(static) reduction(+:error)
 #endif
-        for(mf_int i = 0; i < (mf_long)cv_block_ids.size(); i++)
+        for(mf_int i = 0; i < (mf_long)cv_block_ids.size(); ++i)
         {
             BlockBase *block = blocks[cv_block_ids[i]];
             block->reload();
@@ -733,7 +733,7 @@ mf_double Utility::calc_error(
 #if defined USEOMP
 #pragma omp parallel for num_threads(nr_threads) schedule(static) reduction(+:error)
 #endif
-                for(mf_int i = 0; i < (mf_long)cv_block_ids.size(); i++)
+                for(mf_int i = 0; i < (mf_long)cv_block_ids.size(); ++i)
                 {
                     BlockBase *block = blocks[cv_block_ids[i]];
                     block->reload();
@@ -754,7 +754,7 @@ mf_double Utility::calc_error(
 #if defined USEOMP
 #pragma omp parallel for num_threads(nr_threads) schedule(static) reduction(+:error)
 #endif
-                for(mf_int i = 0; i < (mf_long)cv_block_ids.size(); i++)
+                for(mf_int i = 0; i < (mf_long)cv_block_ids.size(); ++i)
                 {
                     BlockBase *block = blocks[cv_block_ids[i]];
                     block->reload();
@@ -820,7 +820,7 @@ void Utility::shuffle_problem(
 #if defined USEOMP
 #pragma omp parallel for num_threads(nr_threads) schedule(static)
 #endif
-    for(mf_long i = 0; i < prob.nnz; i++)
+    for(mf_long i = 0; i < prob.nnz; ++i)
     {
         mf_node &N = prob.R[i];
         if(N.u < (mf_long)p_map.size())
@@ -847,7 +847,7 @@ vector<mf_node*> Utility::grid_problem(
         return (u/seg_p)*nr_bins+v/seg_q;
     };
 
-    for(mf_long i = 0; i < prob.nnz; i++)
+    for(mf_long i = 0; i < prob.nnz; ++i)
     {
         mf_node &N = prob.R[i];
         mf_int block = get_block_id(N.u, N.v);
@@ -859,11 +859,11 @@ vector<mf_node*> Utility::grid_problem(
     vector<mf_node*> ptrs(nr_bins*nr_bins+1);
     mf_node *ptr = prob.R;
     ptrs[0] = ptr;
-    for(mf_int block = 0; block < nr_bins*nr_bins; block++)
+    for(mf_int block = 0; block < nr_bins*nr_bins; ++block)
         ptrs[block+1] = ptrs[block] + counts[block];
 
     vector<mf_node*> pivots(ptrs.begin(), ptrs.end()-1);
-    for(mf_int block = 0; block < nr_bins*nr_bins; block++)
+    for(mf_int block = 0; block < nr_bins*nr_bins; ++block)
     {
         for(mf_node* pivot = pivots[block]; pivot != ptrs[block+1];)
         {
@@ -883,7 +883,7 @@ vector<mf_node*> Utility::grid_problem(
 #if defined USEOMP
 #pragma omp parallel for num_threads(nr_threads) schedule(dynamic)
 #endif
-    for(mf_int block = 0; block < nr_bins*nr_bins; block++)
+    for(mf_int block = 0; block < nr_bins*nr_bins; ++block)
     {
         if(prob.m > prob.n)
             sort(ptrs[block], ptrs[block+1], sort_node_by_p());
@@ -891,7 +891,7 @@ vector<mf_node*> Utility::grid_problem(
             sort(ptrs[block], ptrs[block+1], sort_node_by_q());
     }
 
-    for(mf_int i = 0; i < (mf_long)blocks.size(); i++)
+    for(mf_int i = 0; i < (mf_long)blocks.size(); ++i)
         blocks[i].tie_to(ptrs[i], ptrs[i+1]);
 
     return ptrs;
@@ -932,7 +932,7 @@ void Utility::grid_shuffle_scale_problem_on_disk(
         counts[bid+1]++;
     }
 
-    for(mf_int i = 1; i < nr_bins*nr_bins+1; i++)
+    for(mf_int i = 1; i < nr_bins*nr_bins+1; ++i)
     {
         counts[i] += counts[i-1];
         pivots[i-1] = counts[i-1];
@@ -951,7 +951,7 @@ void Utility::grid_shuffle_scale_problem_on_disk(
         pivots[bid]++;
     }
 
-    for(mf_int i = 0; i < nr_bins*nr_bins; i++)
+    for(mf_int i = 0; i < nr_bins*nr_bins; ++i)
     {
         vector<mf_node> nodes(static_cast<size_t>(counts[i+1]-counts[i]));
         buffer.clear();
@@ -969,7 +969,7 @@ void Utility::grid_shuffle_scale_problem_on_disk(
         buffer.read((char*)nodes.data(), sizeof(mf_node)*nodes.size());
     }
 
-    for(mf_int i = 0; i < (mf_long)blocks.size(); i++)
+    for(mf_int i = 0; i < (mf_long)blocks.size(); ++i)
         blocks[i].tie_to(buffer_path, counts[i], counts[i+1]);
 }
 
@@ -1039,15 +1039,15 @@ mf_model* Utility::init_model(mf_int fun,
     {
         memset(start_ptr, 0, static_cast<size_t>(
                     sizeof(mf_float) * size*model->k));
-        for(mf_long i = 0; i < size; i++)
+        for(mf_long i = 0; i < size; ++i)
         {
             mf_float * ptr = start_ptr + i*model->k;
             if(counts[static_cast<size_t>(i)] > 0)
-                for(mf_long d = 0; d < k_real; d++, ptr++)
+                for(mf_long d = 0; d < k_real; d++, ++ptr)
                     *ptr = (mf_float)(distribution(generator)*scale);
             else
                 if(fun != P_ROW_BPR_MFOC && fun != P_COL_BPR_MFOC) // unseen for bpr is 0
-                    for(mf_long d = 0; d < k_real; d++, ptr++)
+                    for(mf_long d = 0; d < k_real; d++, ++ptr)
                         *ptr = numeric_limits<mf_float>::quiet_NaN();
         }
     };
@@ -1093,13 +1093,13 @@ mf_model* Utility::init_model(mf_int m, mf_int n, mf_int k)
     // since the approximated rating matrix is PQ^T.
 
     // Initialize P with zeros
-    for (mf_long i = 0; i < k * m; ++i)
+    for(mf_long i = 0; i < k * m; ++i)
         model->P[i] = 0.0;
 
     // Initialize Q with random numbers
     default_random_engine generator;
     uniform_real_distribution<mf_float> distribution(0.0, 1.0);
-    for (mf_long i = 0; i < k * n; ++i)
+    for(mf_long i = 0; i < k * n; ++i)
         model->Q[i] = distribution(generator);
 
     return model;
@@ -1109,7 +1109,7 @@ vector<mf_int> Utility::gen_random_map(mf_int size)
 {
     srand(0);
     vector<mf_int> map(size, 0);
-    for(mf_int i = 0; i < size; i++)
+    for(mf_int i = 0; i < size; ++i)
         map[i] = i;
     random_shuffle(map.begin(), map.end());
     return map;
@@ -1118,7 +1118,7 @@ vector<mf_int> Utility::gen_random_map(mf_int size)
 vector<mf_int> Utility::gen_inv_map(vector<mf_int> &map)
 {
     vector<mf_int> inv_map(map.size());
-    for(mf_int i = 0; i < (mf_long)map.size(); i++)
+    for(mf_int i = 0; i < (mf_long)map.size(); ++i)
       inv_map[map[i]] = i;
     return inv_map;
 }
@@ -1141,7 +1141,7 @@ void Utility::shuffle_model(
 
             mf_int next = map[pivot];
 
-            for(mf_int d = 0; d < k; d++)
+            for(mf_int d = 0; d < k; ++d)
                 swap(*(vec+(mf_long)pivot*k+d), *(vec+(mf_long)next*k+d));
 
             map[pivot] = map[next];
@@ -1160,7 +1160,7 @@ void Utility::shrink_model(mf_model &model, mf_int k_new)
 
     auto shrink1 = [&] (mf_float *ptr, mf_int size)
     {
-        for(mf_int i = 0; i < size; i++)
+        for(mf_int i = 0; i < size; ++i)
         {
             mf_float *src = ptr+(mf_long)i*k_old;
             mf_float *dst = ptr+(mf_long)i*k_new;
@@ -1522,7 +1522,7 @@ void SolverBase::arrange_block()
 inline void SolverBase::calc_z(mf_float &z, mf_int k, mf_float *p, mf_float *q)
 {
     z = 0;
-    for(mf_int d = 0; d < k; d++)
+    for(mf_int d = 0; d < k; ++d)
         z += p[d]*q[d];
 }
 
@@ -1755,7 +1755,7 @@ void MFSolver::sg_update(mf_int d_begin, mf_int d_end, mf_float rk)
     mf_float pG1 = 0;
     mf_float qG1 = 0;
 
-    for(mf_int d = d_begin; d < d_end; d++)
+    for(mf_int d = d_begin; d < d_end; ++d)
     {
         mf_float gp = -z*q[d]+lambda_p2*p[d];
         mf_float gq = -z*p[d]+lambda_q2*q[d];
@@ -1769,7 +1769,7 @@ void MFSolver::sg_update(mf_int d_begin, mf_int d_end, mf_float rk)
 
     if(lambda_p1 > 0)
     {
-        for(mf_int d = d_begin; d < d_end; d++)
+        for(mf_int d = d_begin; d < d_end; ++d)
         {
             mf_float p1 = max(abs(p[d])-lambda_p1*eta_p, 0.0f);
             p[d] = p[d] >= 0? p1: -p1;
@@ -1778,7 +1778,7 @@ void MFSolver::sg_update(mf_int d_begin, mf_int d_end, mf_float rk)
 
     if(lambda_q1 > 0)
     {
-        for(mf_int d = d_begin; d < d_end; d++)
+        for(mf_int d = d_begin; d < d_end; ++d)
         {
             mf_float q1 = max(abs(q[d])-lambda_q1*eta_q, 0.0f);
             q[d] = q[d] >= 0? q1: -q1;
@@ -1787,7 +1787,7 @@ void MFSolver::sg_update(mf_int d_begin, mf_int d_end, mf_float rk)
 
     if(param.do_nmf)
     {
-        for(mf_int d = d_begin; d < d_end; d++)
+        for(mf_int d = d_begin; d < d_end; ++d)
         {
             p[d] = max(p[d], (mf_float)0.0f);
             q[d] = max(q[d], (mf_float)0.0f);
@@ -2373,7 +2373,7 @@ void BPRSolver::sg_update(mf_int d_begin, mf_int d_end, __m128 XMMz,
     }
 
     _mm_store_ss(&tmp, XMMlambda_q1);
-    if (tmp > 0)
+    if(tmp > 0)
     {
         for(mf_int d = d_begin; d < d_end; d += 4)
         {
@@ -2540,7 +2540,7 @@ void BPRSolver::sg_update(mf_int d_begin, mf_int d_end, __m256 XMMz,
     }
 
     _mm_store_ss(&tmp, _mm256_castps256_ps128(XMMlambda_q1));
-    if (tmp > 0)
+    if(tmp > 0)
     {
         for(mf_int d = d_begin; d < d_end; d += 8)
         {
@@ -2625,7 +2625,7 @@ inline void BPRSolver::calc_z(
     mf_float &z, mf_int k, mf_float *p, mf_float *q, mf_float *w)
 {
     z = 0;
-    for(mf_int d = 0; d < k; d++)
+    for(mf_int d = 0; d < k; ++d)
         z += p[d]*(q[d]-w[d]);
 }
 
@@ -2655,7 +2655,7 @@ void BPRSolver::sg_update(mf_int d_begin, mf_int d_end, mf_float rk)
     mf_float qG1 = 0;
     mf_float wG1 = 0;
 
-    for(mf_int d = d_begin; d < d_end; d++)
+    for(mf_int d = d_begin; d < d_end; ++d)
     {
         mf_float gp = z*(w[d]-q[d]) + lambda_p2*p[d];
         mf_float gq = -z*p[d] + lambda_q2*q[d];
@@ -2672,16 +2672,16 @@ void BPRSolver::sg_update(mf_int d_begin, mf_int d_end, mf_float rk)
 
     if(lambda_p1 > 0)
     {
-        for(mf_int d = d_begin; d < d_end; d++)
+        for(mf_int d = d_begin; d < d_end; ++d)
         {
             mf_float p1 = max(abs(p[d])-lambda_p1*eta_p, 0.0f);
             p[d] = p[d] >= 0? p1: -p1;
         }
     }
 
-    if (lambda_q1 > 0)
+    if(lambda_q1 > 0)
     {
-        for(mf_int d = d_begin; d < d_end; d++)
+        for(mf_int d = d_begin; d < d_end; ++d)
         {
             mf_float q1 = max(abs(w[d])-lambda_q1*eta_w, 0.0f);
             w[d] = w[d] >= 0? q1: -q1;
@@ -2692,7 +2692,7 @@ void BPRSolver::sg_update(mf_int d_begin, mf_int d_end, mf_float rk)
 
     if(param.do_nmf)
     {
-        for(mf_int d = d_begin; d < d_end; d++)
+        for(mf_int d = d_begin; d < d_end; ++d)
         {
             p[d] = max(p[d], (mf_float)0.0);
             q[d] = max(q[d], (mf_float)0.0);
@@ -2948,7 +2948,7 @@ void fpsg_core(
     vector<shared_ptr<SolverBase>> solvers(param.nr_threads);
     vector<thread> threads;
     threads.reserve(param.nr_threads);
-    for(mf_int i = 0; i < param.nr_threads; i++)
+    for(mf_int i = 0; i < param.nr_threads; ++i)
     {
         solvers[i] = SolverFactory::get_solver(sched, block_ptrs,
                                                PG.data(), QG.data(),
@@ -2956,7 +2956,7 @@ void fpsg_core(
         threads.emplace_back(&SolverBase::run, solvers[i].get());
     }
 
-    for(mf_int iter = 0; iter < param.nr_iters; iter++)
+    for(mf_int iter = 0; iter < param.nr_iters; ++iter)
     {
         sched.wait_for_jobs_done();
 
@@ -3117,7 +3117,7 @@ try
                 tr->m, tr->n, param.k, avg/scale, omega_p, omega_q),
                 [] (mf_model *ptr) { mf_destroy_model(&ptr); });
 
-    for(mf_int i = 0; i < (mf_long)blocks.size(); i++)
+    for(mf_int i = 0; i < (mf_long)blocks.size(); ++i)
         block_ptrs[i] = &blocks[i];
 
     fpsg_core(util, sched, tr.get(), va.get(), param, scale,
@@ -3194,7 +3194,7 @@ try
                 tr.m, tr.n, param.k, avg/scale, omega_p, omega_q),
                 [] (mf_model *ptr) { mf_destroy_model(&ptr); });
 
-    for(mf_int i = 0; i < (mf_long)blocks.size(); i++)
+    for(mf_int i = 0; i < (mf_long)blocks.size(); ++i)
         block_ptrs[i] = &blocks[i];
 
     fpsg_core(util, sched, &tr, &va, param, scale,
@@ -3250,14 +3250,14 @@ void calc_ccd_one_class_obj(const mf_int nr_threads,
     // Reduce P along column axis, which is the sum of rows in P. 
     vector<mf_double> all_p_sum(d, 0.0);
     // Compute square of Frobenius norm on P and sum of all rows in P.
-    for (mf_int k = 0; k < d; ++k)
+    for(mf_int k = 0; k < d; ++k)
     {
         // Declare a temporal buffer of all_p_sum[k] for using OpenMP.
         mf_double all_p_sum_k = 0.0;
 #if defined USEOMP
 #pragma omp parallel for num_threads(nr_threads) schedule(static) reduction(+:p_square_norm,all_p_sum_k)
 #endif
-        for (mf_int u = 0; u < m; ++u)
+        for(mf_int u = 0; u < m; ++u)
         {
             const mf_float &p_ku = P[u + k * m];
             p_square_norm += p_ku * p_ku;
@@ -3271,14 +3271,14 @@ void calc_ccd_one_class_obj(const mf_int nr_threads,
     // Reduce Q along column axis, whihc is the sum of rows in Q.
     vector<mf_double> all_q_sum(d, 0.0);
     // Compute square of Frobenius norm on Q and sum of all elements in Q
-    for (mf_int k = 0; k < d; ++k)
+    for(mf_int k = 0; k < d; ++k)
     {
         // Declare a temporal buffer of all_p_sum[k] for using OpenMP.
         mf_double all_q_sum_k = 0.0;
 #if defined USEOMP
 #pragma omp parallel for num_threads(nr_threads) schedule(static) reduction(+:q_square_norm,all_q_sum_k)
 #endif
-        for (mf_int v = 0; v < n; ++v)
+        for(mf_int v = 0; v < n; ++v)
         {
             const mf_float &q_kv = Q[v + k * n];
             q_square_norm += q_kv * q_kv;
@@ -3294,16 +3294,16 @@ void calc_ccd_one_class_obj(const mf_int nr_threads,
     vector<mf_double> QTQ(d * d, 0.0);
     // We calculate PTP and QTQ because they are needed in the computation of
     // negative entries' loss function.
-    for (mf_int k1 = 0; k1 < d; ++k1)
+    for(mf_int k1 = 0; k1 < d; ++k1)
     {
-        for (mf_int k2 = 0; k2 < d; ++k2)
+        for(mf_int k2 = 0; k2 < d; ++k2)
         {
             // Inner product of the k1 and k2 columns in P, a m-by-d matrix.
             mf_double p_k1_p_k2_inner_product = 0.0;
 #if defined USEOMP
 #pragma omp parallel for num_threads(nr_threads) schedule(static) reduction(+:p_k1_p_k2_inner_product)
 #endif
-            for (mf_int u = 0; u < m; ++u)
+            for(mf_int u = 0; u < m; ++u)
                 p_k1_p_k2_inner_product += P[u + k1 * m] * P[u + k2 * m];
             PTP[k1 * d + k2] = p_k1_p_k2_inner_product;
 
@@ -3312,7 +3312,7 @@ void calc_ccd_one_class_obj(const mf_int nr_threads,
 #if defined USEOMP
 #pragma omp parallel for num_threads(nr_threads) schedule(static) reduction(+:q_k1_q_k2_inner_product)
 #endif
-            for (mf_int v = 0; v < n; ++v)
+            for(mf_int v = 0; v < n; ++v)
                 q_k1_q_k2_inner_product += Q[v + k1 * n] * Q[v + k2 * n];
             QTQ[k1 * d + k2] = q_k1_q_k2_inner_product;
         }
@@ -3328,7 +3328,7 @@ void calc_ccd_one_class_obj(const mf_int nr_threads,
 #if defined USEOMP
 #pragma omp parallel for num_threads(nr_threads) schedule(static) reduction(+:positive_loss1,positive_loss2)
 #endif
-    for (mf_long i = 0; i < data->nnz; ++i)
+    for(mf_long i = 0; i < data->nnz; ++i)
     {
         const mf_double &r = data->R[i].r;
         positive_loss1 += (1.0 - r) * (1.0 - r);
@@ -3342,10 +3342,10 @@ void calc_ccd_one_class_obj(const mf_int nr_threads,
     mf_double negative_loss2 = 0.0;
     mf_double negative_loss3 = 0.0;
     // Compute loss terms.
-    for (mf_int k1 = 0; k1 < d; ++k1)
+    for(mf_int k1 = 0; k1 < d; ++k1)
     {
         negative_loss2 += all_p_sum[k1] * all_q_sum[k1];
-        for (mf_int k2 = 0; k2 < d; ++k2)
+        for(mf_int k2 = 0; k2 < d; ++k2)
             negative_loss3 += PTP[k1 + k2 * d] * QTQ[k2 + k1 * d];
     }
     // Compute the loss function of negative matrix entries.
@@ -3370,48 +3370,48 @@ void ccd_one_class_core(
     shared_ptr<mf_model> &model)
 {
     // Check problems stored in CSR and CSC formats
-    if (tr_csr == nullptr) throw invalid_argument("CSR problem pointer is null.");
-    if (tr_csc == nullptr) throw invalid_argument("CSC problem pointer is null.");
+    if(tr_csr == nullptr) throw invalid_argument("CSR problem pointer is null.");
+    if(tr_csc == nullptr) throw invalid_argument("CSC problem pointer is null.");
 
-    if (tr_csr->m != tr_csc->m)
+    if(tr_csr->m != tr_csc->m)
         throw logic_error(
                 "Row counts must be identical in CSR and CSC formats: " +
                 to_string(tr_csr->m) + " != " + to_string(tr_csc->m));
     const mf_int m = tr_csr->m;
 
-    if (tr_csr->n != tr_csc->n)
+    if(tr_csr->n != tr_csc->n)
         throw logic_error(
                 "Column counts must be identical in CSR and CSC formats: " +
                 to_string(tr_csr->n) + " != " + to_string(tr_csc->n));
     const mf_int n = tr_csr->n;
 
-    if (tr_csc->nnz != tr_csc->nnz)
+    if(tr_csc->nnz != tr_csc->nnz)
         throw logic_error(
                 "Numbers of data points must be identical in CSR and CSC formats: " +
                 to_string(tr_csr->nnz) + " != " + to_string(tr_csc->nnz));
     const mf_long nnz = tr_csr->nnz;
 
     // Check formulation parameters
-    if (param.k <= 0)
+    if(param.k <= 0)
         throw invalid_argument(
                 "Latent dimension must be positive but got " + 
                 to_string(param.k));
     const mf_int d = param.k;
 
-    if (param.lambda_p2 <= 0)
+    if(param.lambda_p2 <= 0)
         throw invalid_argument(
                 "P's regularization coefficient must be positive but got " + 
                 to_string(param.lambda_p2));
-    if (param.lambda_q2 <= 0)
+    if(param.lambda_q2 <= 0)
         throw invalid_argument(
                 "Q's regularization coefficient must be positive but got " + 
                 to_string(param.lambda_q2));
 
     // Check some resources prepared internally
-    if (ptrs_u.size() != (size_t)m + 1)
+    if(ptrs_u.size() != (size_t)m + 1)
         throw invalid_argument("Number of row pointer must be " +
                 to_string(m + 1) + " but got " + to_string(ptrs_u.size()));
-    if (ptrs_v.size() != (size_t)n + 1)
+    if(ptrs_v.size() != (size_t)n + 1)
         throw invalid_argument("Number of column pointer must be " +
                 to_string(n + 1) + " but got " + to_string(ptrs_v.size()));
 
@@ -3438,7 +3438,7 @@ void ccd_one_class_core(
 #if defined USEOMP
 #pragma omp parallel for num_threads(util.get_thread_number()) schedule(static)
 #endif
-    for (mf_long i = 0; i < nnz; ++i)
+    for(mf_long i = 0; i < nnz; ++i)
     {
         tr_csr->R[i].r = 0.0;
         tr_csc->R[i].r = 0.0;
@@ -3449,18 +3449,18 @@ void ccd_one_class_core(
     // please use the following initialization code to compute
     // and cache all prediction values on positive entries.
     /*
-    for (mf_long i = 0; i < nnz; ++i)
+    for(mf_long i = 0; i < nnz; ++i)
     {
         mf_node &node = tr_csr->R[i];
         node.r = 0;
-        for (mf_int k = 0; k < d; ++k)
+        for(mf_int k = 0; k < d; ++k)
             node.r += P[node.u + k * m]*Q[node.v + k * n];
     }
-    for (mf_long i = 0; i < nnz; ++i)
+    for(mf_long i = 0; i < nnz; ++i)
     {
         mf_node &node = tr_csc->R[i];
         node.r = 0;
-        for (mf_int k = 0; k < d; ++k)
+        for(mf_int k = 0; k < d; ++k)
             node.r += P[node.u + k * m]*Q[node.v + k * n];
     }
     */
@@ -3497,12 +3497,12 @@ void ccd_one_class_core(
     // Q = [\bar{q}_1, ..., \bar{q}_d] \in R^{n \times k}
     // Finally, the rating matrice R would be approximated via
     // R ~ PQ^T \in R^{m \times n}
-    for (mf_int outer = 0; outer < param.nr_iters; ++outer)
+    for(mf_int outer = 0; outer < param.nr_iters; ++outer)
     {
         // Update \bar{p}_k and \bar{q}_k. The basic idea is
         // to replace \bar{p}_k and \bar{q}_k with a and b,
         // and then minimizes the original objective function.
-        for (mf_int k = 0; k < d; ++k)
+        for(mf_int k = 0; k < d; ++k)
         {
             // Get the pointer to the first element of \bar{p}_k (and
             // \bar{q}_k).
@@ -3514,7 +3514,7 @@ void ccd_one_class_core(
             vector<mf_float> a(P_k, P_k + m);
             vector<mf_float> b(Q_k, Q_k + n);
 
-            for (mf_int inner = 0; inner < 3; ++inner)
+            for(mf_int inner = 0; inner < 3; ++inner)
             {
                 ///////////////////////////////////////////////////////////////
                 // Update a:
@@ -3531,7 +3531,7 @@ void ccd_one_class_core(
 #if defined USEOMP
 #pragma omp parallel for num_threads(util.get_thread_number()) schedule(static) reduction(+:b_hat,b_tilde)
 #endif
-                for (mf_int v = 0; v < n; ++v)
+                for(mf_int v = 0; v < n; ++v)
                 {
                     const mf_double &b_v = b[v]; 
                     b_hat += b_v;
@@ -3541,7 +3541,7 @@ void ccd_one_class_core(
                 // Compute and cache a constant vector
                 // s_k = \sum_{v=1}^n \bar{q}_{kv}b_v, k = 1, ..., d
                 vector<mf_double> s(d, 0.0); 
-                for (mf_int k1 = 0; k1 < d; ++k1)
+                for(mf_int k1 = 0; k1 < d; ++k1)
                 {
                     // Buffer variable for using OpenMP
                     mf_double s_k1 = 0;
@@ -3549,7 +3549,7 @@ void ccd_one_class_core(
 #if defined USEOMP
 #pragma omp parallel for num_threads(util.get_thread_number()) schedule(static) reduction(+:s_k1)
 #endif
-                    for (mf_int v = 0; v < n; ++v)
+                    for(mf_int v = 0; v < n; ++v)
                         s_k1 += Q_k1[v] * b[v];
                     s[k1] = s_k1;
                 }
@@ -3558,7 +3558,7 @@ void ccd_one_class_core(
 #if defined USEOMP
 #pragma omp parallel for num_threads(util.get_thread_number()) schedule(static)
 #endif
-                for (mf_int u = 0; u < m; ++u)
+                for(mf_int u = 0; u < m; ++u)
                 {
                     ////////////////////////////////////////////////////////
                     // Update a[u] via Newton method. Let g_u and h_u denote
@@ -3572,7 +3572,7 @@ void ccd_one_class_core(
                     mf_double h_u_1 = 0.0;
                     mf_double g_u_2 = 0.0;
                     // Scan through specified entries at the u-th row
-                    for (const mf_node *ptr = ptrs_u[u]; ptr != ptrs_u[u+1]; ++ptr)
+                    for(const mf_node *ptr = ptrs_u[u]; ptr != ptrs_u[u+1]; ++ptr)
                     {
                         const mf_int &v = ptr->v;
                         const mf_float &b_v = b[v];
@@ -3581,7 +3581,7 @@ void ccd_one_class_core(
                         g_u_2 += (ptr->r - P_k[u] * Q_k[v] + a[u] * b_v) * b_v;
                     }
                     mf_double g_u_3 = -c * b_hat - P_k[u] * s[k] + a[u] * b_tilde;
-                    for (mf_int k1 = 0; k1 < d; ++k1)
+                    for(mf_int k1 = 0; k1 < d; ++k1)
                         g_u_3 += P[m * k1 + u] * s[k1];
                     mf_double g_u = -(1.0 - alpha * c) * g_u_1 + (1.0 - alpha) * g_u_2 + alpha * g_u_3 + lambda_p2 * a[u];
                     mf_double h_u = (1.0 - alpha) * h_u_1 + alpha * b_tilde + lambda_p2;
@@ -3602,7 +3602,7 @@ void ccd_one_class_core(
 #if defined USEOMP
 #pragma omp parallel for num_threads(util.get_thread_number()) schedule(static) reduction(+:a_hat,a_tilde)
 #endif
-                for (mf_int u = 0; u < m; ++u)
+                for(mf_int u = 0; u < m; ++u)
                 {
                     const mf_float &a_u = a[u];
                     a_hat += a_u;
@@ -3612,7 +3612,7 @@ void ccd_one_class_core(
                 // Compute and cache t
                 // t_k = \sum_{u=1}^m \bar{a}_{ku}a_u, k = 1, ..., d
                 vector<mf_double> t(d, 0.0);
-                for (mf_int k1 = 0; k1 < d; ++k1)
+                for(mf_int k1 = 0; k1 < d; ++k1)
                 {
                     // Declare buffer variable for using OpenMP
                     mf_double t_k1 = 0;
@@ -3620,7 +3620,7 @@ void ccd_one_class_core(
 #if defined USEOMP
 #pragma omp parallel for num_threads(util.get_thread_number()) schedule(static) reduction(+:t_k1)
 #endif
-                    for (mf_int u = 0; u < m; ++u)
+                    for(mf_int u = 0; u < m; ++u)
                         t_k1 += P_k1[u] * a[u];
                     t[k1] = t_k1;
                 }
@@ -3628,7 +3628,7 @@ void ccd_one_class_core(
 #if defined USEOMP
 #pragma omp parallel for num_threads(util.get_thread_number()) schedule(static)
 #endif
-                for (mf_int v = 0; v < n; ++v)
+                for(mf_int v = 0; v < n; ++v)
                 {
                     ////////////////////////////////////////////////////////
                     // Update b[v] via Newton method. Let g_v and h_v denote
@@ -3642,7 +3642,7 @@ void ccd_one_class_core(
                     mf_double g_v_2 = 0;
                     mf_double h_v_1 = 0;
                     // Scan through all positive entries at column v
-                    for (const mf_node *ptr = ptrs_v[v]; ptr != ptrs_v[v+1]; ++ptr)
+                    for(const mf_node *ptr = ptrs_v[v]; ptr != ptrs_v[v+1]; ++ptr)
                     {
                         const mf_int &u = ptr->u;
                         const mf_float &a_u = a[u];
@@ -3651,7 +3651,7 @@ void ccd_one_class_core(
                         g_v_2 += (ptr->r - P_k[u] * Q_k[v] + a_u * b[v]) * a_u;
                     }
                     mf_double g_v_3 = -c * a_hat - Q_k[v] * t[k] + b[v] * a_tilde;
-                    for (mf_int k1 = 0; k1 < d; ++k1)
+                    for(mf_int k1 = 0; k1 < d; ++k1)
                         g_v_3 += Q[n * k1 + v] * t[k1];
                     mf_double g_v = -(1.0 - alpha * c) * g_v_1 + (1.0 - alpha) * g_v_2 +
                         alpha * g_v_3 + lambda_q2 * b[v];
@@ -3667,7 +3667,7 @@ void ccd_one_class_core(
 #if defined USEOMP
 #pragma omp parallel for num_threads(util.get_thread_number()) schedule(static)
 #endif
-                for (mf_long i = 0; i < tr_csr->nnz; ++i)
+                for(mf_long i = 0; i < tr_csr->nnz; ++i)
                 {
                     // Update prediction values of positive entries in CSR
                     mf_node *csr_ptr = tr_csr->R + i;
@@ -3686,12 +3686,12 @@ void ccd_one_class_core(
 #pragma omp parallel for num_threads(util.get_thread_number()) schedule(static)
 #endif
                 // Update P_k and Q_k
-                for (mf_int u = 0; u < m; ++u)
+                for(mf_int u = 0; u < m; ++u)
                     P_k[u] = a[u];
 #if defined USEOMP
 #pragma omp parallel for num_threads(util.get_thread_number()) schedule(static)
 #endif
-                for (mf_int v = 0; v < n; ++v)
+                for(mf_int v = 0; v < n; ++v)
                     Q_k[v] = b[v];
             }
         }
@@ -3722,7 +3722,7 @@ void ccd_one_class_core(
         cout.width(15);
         cout << fixed << setprecision(4) << negative_loss;
 
-        if (va->nnz != 0)
+        if(va->nnz != 0)
         {
             // The following loop computes prediction scores on validation set.
             // Because training scores is also maintained in coordinate descent
@@ -3730,11 +3730,11 @@ void ccd_one_class_core(
 #if defined USEOMP
 #pragma omp parallel for num_threads(util.get_thread_number()) schedule(static)
 #endif
-            for (mf_long i = 0; i < va->nnz; ++i)
+            for(mf_long i = 0; i < va->nnz; ++i)
             {
                 mf_node &node = va->R[i];
                 node.r = 0;
-                for (mf_int k = 0; k < d; ++k)
+                for(mf_int k = 0; k < d; ++k)
                     node.r += P[node.u + k * m]*Q[node.v + k * n];
             }
 
@@ -3766,16 +3766,16 @@ void ccd_one_class_core(
 #if defined USEOMP
 #pragma omp parallel for num_threads(util.get_thread_number()) schedule(static)
 #endif
-    for (mf_int u = 0; u < m; ++u)
-        for (mf_int k = 0; k < d; ++k)
+    for(mf_int u = 0; u < m; ++u)
+        for(mf_int k = 0; k < d; ++k)
             P_transpose[k + u * d] = P[u + k * m];
     Utility::free_aligned_float(P);
     mf_float *Q_transpose = Utility::malloc_aligned_float((mf_long)n * d);
 #if defined USEOMP
 #pragma omp parallel for num_threads(util.get_thread_number()) schedule(static)
 #endif
-    for (mf_int v = 0; v < n; ++v)
-        for (mf_int k = 0; k < d; ++k)
+    for(mf_int v = 0; v < n; ++v)
+        for(mf_int k = 0; k < d; ++k)
             Q_transpose[k + v * d] = Q[v + k * n];
     Utility::free_aligned_float(Q);
 
@@ -3839,7 +3839,7 @@ try
     // Save addresses of rows for CSR and columns for CSC
     mf_int u_current = -1;
     mf_int v_current = -1;
-    for (long i = 0; i < tr_->nnz; ++i)
+    for(mf_long i = 0; i < tr_->nnz; ++i)
     {
         mf_node* N = nullptr;
 
@@ -3857,18 +3857,18 @@ try
         //   ptrs[0] = pointer of (0, 1, 0.5)
         //   ptrs[1] = pointer of (0, 2, 1.5)
         //   ptrs[2] = pointer of (0, 2, 1.5)
-        if (N->u > u_current)
+        if(N->u > u_current)
         {
-            for (mf_int u_passed = u_current + 1; u_passed <= N->u; ++u_passed)
+            for(mf_int u_passed = u_current + 1; u_passed <= N->u; ++u_passed)
                 ptrs_u[u_passed] = tr_csr->R + i;
             u_current = N->u;
         }
 
         // Deal with CSC format
         N = tr_csc->R + i;
-        if (N->v > v_current)
+        if(N->v > v_current)
         {
-            for (mf_int v_passed = v_current + 1; v_passed <= N->v; ++v_passed)
+            for(mf_int v_passed = v_current + 1; v_passed <= N->v; ++v_passed)
                 ptrs_v[v_passed] = tr_csc->R + i;
             v_current = N->v;
         }
@@ -4009,7 +4009,7 @@ mf_double CrossValidatorBase::do_cross_validation()
 {
     vector<mf_int> cv_blocks;
     srand(0);
-    for(mf_int block = 0; block < nr_bins*nr_bins; block++)
+    for(mf_int block = 0; block < nr_bins*nr_bins; ++block)
         cv_blocks.push_back(block);
     random_shuffle(cv_blocks.begin(), cv_blocks.end());
 
@@ -4024,7 +4024,7 @@ mf_double CrossValidatorBase::do_cross_validation()
 
     cv_error = 0;
 
-    for(mf_int fold = 0; fold < nr_folds; fold++)
+    for(mf_int fold = 0; fold < nr_folds; ++fold)
     {
         mf_int begin = fold*nr_blocks_per_fold;
         mf_int end = min((fold+1)*nr_blocks_per_fold, nr_bins*nr_bins);
@@ -4108,7 +4108,7 @@ mf_model* mf_train_with_validation(
 
     shared_ptr<mf_model> model(nullptr);
     
-    if (param.fun != P_L2_MFOC)
+    if(param.fun != P_L2_MFOC)
         // Use stochastic gradient method
         model = fpsg(tr, va, param);
     else
@@ -4260,20 +4260,20 @@ mf_int mf_save_model(mf_model const *model, char const *path)
 
     auto write = [&] (mf_float *ptr, mf_int size, char prefix)
     {
-        for(mf_int i = 0; i < size; i++)
+        for(mf_int i = 0; i < size; ++i)
         {
             mf_float *ptr1 = ptr + (mf_long)i*model->k;
             f << prefix << i << " ";
             if(isnan(ptr1[0]))
             {
                 f << "F ";
-                for(mf_int d = 0; d < model->k; d++)
+                for(mf_int d = 0; d < model->k; ++d)
                     f << 0 << " ";
             }
             else
             {
                 f << "T ";
-                for(mf_int d = 0; d < model->k; d++)
+                for(mf_int d = 0; d < model->k; ++d)
                     f << ptr1[d] << " ";
             }
             f << endl;
@@ -4318,18 +4318,18 @@ mf_model* mf_load_model(char const *path)
 
     auto read = [&] (mf_float *ptr, mf_int size)
     {
-        for(mf_int i = 0; i < size; i++)
+        for(mf_int i = 0; i < size; ++i)
         {
             mf_float *ptr1 = ptr + (mf_long)i*model->k;
             f >> dummy >> dummy;
             if(dummy.compare("F") == 0) // nan vector starts with "F"
-                for(mf_int d = 0; d < model->k; d++)
+                for(mf_int d = 0; d < model->k; ++d)
                 {
                     f >> dummy;
                     ptr1[d] = numeric_limits<mf_float>::quiet_NaN();
                 }
             else
-                for(mf_int d = 0; d < model->k; d++)
+                for(mf_int d = 0; d < model->k; ++d)
                     f >> ptr1[d];
         }
     };
@@ -4381,7 +4381,7 @@ mf_double calc_rmse(mf_problem *prob, mf_model *model)
 #if defined USEOMP
 #pragma omp parallel for schedule(static) reduction(+:loss)
 #endif
-    for(mf_long i = 0; i < prob->nnz; i++)
+    for(mf_long i = 0; i < prob->nnz; ++i)
     {
         mf_node &N = prob->R[i];
         mf_float e = N.r - mf_predict(model, N.u, N.v);
@@ -4398,7 +4398,7 @@ mf_double calc_mae(mf_problem *prob, mf_model *model)
 #if defined USEOMP
 #pragma omp parallel for schedule(static) reduction(+:loss)
 #endif
-    for(mf_long i = 0; i < prob->nnz; i++)
+    for(mf_long i = 0; i < prob->nnz; ++i)
     {
         mf_node &N = prob->R[i];
         loss += abs(N.r - mf_predict(model, N.u, N.v));
@@ -4414,7 +4414,7 @@ mf_double calc_gkl(mf_problem *prob, mf_model *model)
 #if defined USEOMP
 #pragma omp parallel for schedule(static) reduction(+:loss)
 #endif
-    for(mf_long i = 0; i < prob->nnz; i++)
+    for(mf_long i = 0; i < prob->nnz; ++i)
     {
         mf_node &N = prob->R[i];
         mf_float z = mf_predict(model, N.u, N.v);
@@ -4431,7 +4431,7 @@ mf_double calc_logloss(mf_problem *prob, mf_model *model)
 #if defined USEOMP
 #pragma omp parallel for schedule(static) reduction(+:logloss)
 #endif
-    for(mf_long i = 0; i < prob->nnz; i++)
+    for(mf_long i = 0; i < prob->nnz; ++i)
     {
         mf_node &N = prob->R[i];
         mf_float z = mf_predict(model, N.u, N.v);
@@ -4451,7 +4451,7 @@ mf_double calc_accuracy(mf_problem *prob, mf_model *model)
 #if defined USEOMP
 #pragma omp parallel for schedule(static) reduction(+:acc)
 #endif
-    for(mf_long i = 0; i < prob->nnz; i++)
+    for(mf_long i = 0; i < prob->nnz; ++i)
     {
         mf_node &N = prob->R[i];
         mf_float z = mf_predict(model, N.u, N.v);
@@ -4496,9 +4496,9 @@ pair<mf_double, mf_double> calc_mpr_auc(mf_problem *prob,
         pair<mf_node, mf_float> const &rhs) { return lhs.second < rhs.second; };
 
     vector<mf_int> pos_cnts(m+1, 0);
-    for(mf_int i = 0; i < prob->nnz; i++)
+    for(mf_int i = 0; i < prob->nnz; ++i)
         pos_cnts[prob->R[i].*row_ptr+1]++;
-    for(mf_int i = 1; i < m+1; i++)
+    for(mf_int i = 1; i < m+1; ++i)
         pos_cnts[i] += pos_cnts[i-1];
 
     mf_int total_m = 0;
@@ -4508,14 +4508,14 @@ pair<mf_double, mf_double> calc_mpr_auc(mf_problem *prob,
 #if defined USEOMP
 #pragma omp parallel for schedule(static) reduction(+: total_m, total_pos, all_u_mpr, all_u_auc)
 #endif
-    for(mf_int i = 0; i < m; i++)
+    for(mf_int i = 0; i < m; ++i)
     {
         if(pos_cnts[i+1]-pos_cnts[i] < 1)
             continue;
 
         vector<pair<mf_node, mf_float>> row(n);
 
-        for(mf_int j = 0; j < n; j++)
+        for(mf_int j = 0; j < n; ++j)
         {
             mf_node N;
             N.*row_ptr = i;
@@ -4526,7 +4526,7 @@ pair<mf_double, mf_double> calc_mpr_auc(mf_problem *prob,
 
         mf_int pos = 0;
         vector<mf_int> index(pos_cnts[i+1]-pos_cnts[i], 0);
-        for(mf_int j = pos_cnts[i]; j < pos_cnts[i+1]; j++)
+        for(mf_int j = pos_cnts[i]; j < pos_cnts[i+1]; ++j)
         {
             if(prob->R[j].r <= 0)
                 continue;
@@ -4544,7 +4544,7 @@ pair<mf_double, mf_double> calc_mpr_auc(mf_problem *prob,
         total_pos += pos;
 
         mf_int count = 0;
-        for(mf_int k = 0; k < pos; k++)
+        for(mf_int k = 0; k < pos; ++k)
         {
             swap(row[count], row[index[k]]);
             count++;
@@ -4553,7 +4553,7 @@ pair<mf_double, mf_double> calc_mpr_auc(mf_problem *prob,
 
         mf_double u_mpr = 0;
         mf_double u_auc = 0;
-        for(auto neg_it = row.begin()+pos; neg_it != row.end(); neg_it++)
+        for(auto neg_it = row.begin()+pos; neg_it != row.end(); ++neg_it)
         {
             if(row[pos-1].second <= neg_it->second)
             {
