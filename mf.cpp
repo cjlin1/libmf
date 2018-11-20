@@ -136,7 +136,7 @@ mf_int Scheduler::get_job()
             {
                 busy_p_blocks[p_block] = 1;
                 busy_q_blocks[q_block] = 1;
-                counts[block.second]++;
+                counts[block.second] += 1;
                 is_found = true;
                 break;
             }
@@ -199,11 +199,11 @@ void Scheduler::put_job(mf_int block_idx, mf_double loss, mf_double error)
         busy_q_blocks[block_idx%nr_bins] = 0;
         block_losses[block_idx] = loss;
         block_errors[block_idx] = error;
-        nr_done_jobs++;
+        ++nr_done_jobs;
         mf_float priority =
             (mf_float)counts[block_idx]+distribution(generator);
         pq.emplace(priority, block_idx);
-        nr_paused_threads++;
+        ++nr_paused_threads;
         // Tell others that a block is available again.
         cond_var.notify_all();
     }
@@ -540,7 +540,7 @@ void Utility::collect_info_on_disk(
             prob.m = N.u+1;
         if(N.v+1 > prob.n)
             prob.n = N.v+1;
-        prob.nnz++;
+        prob.nnz += 1;
         ex += (mf_double)N.r;
         ex2 += (mf_double)N.r*N.r;
     }
@@ -851,9 +851,9 @@ vector<mf_node*> Utility::grid_problem(
     {
         mf_node &N = prob.R[i];
         mf_int block = get_block_id(N.u, N.v);
-        counts[block]++;
-        omega_p[N.u]++;
-        omega_q[N.v]++;
+        counts[block] += 1;
+        omega_p[N.u] += 1;
+        omega_q[N.v] += 1;
     }
 
     vector<mf_node*> ptrs(nr_bins*nr_bins+1);
@@ -870,13 +870,13 @@ vector<mf_node*> Utility::grid_problem(
             mf_int curr_block = get_block_id(pivot->u, pivot->v);
             if(curr_block == block)
             {
-                pivot++;
+                ++pivot;
                 continue;
             }
 
             mf_node *next = pivots[curr_block];
             swap(*pivot, *next);
-            pivots[curr_block]++;
+            pivots[curr_block] += 1;
         }
     }
 
@@ -927,9 +927,9 @@ void Utility::grid_shuffle_scale_problem_on_disk(
         N.u = p_map[N.u];
         N.v = q_map[N.v];
         mf_int bid = get_block_id(N.u, N.v);
-        omega_p[N.u]++;
-        omega_q[N.v]++;
-        counts[bid+1]++;
+        omega_p[N.u] += 1;
+        omega_q[N.v] += 1;
+        counts[bid+1] += 1;
     }
 
     for(mf_int i = 1; i < nr_bins*nr_bins+1; ++i)
@@ -948,7 +948,7 @@ void Utility::grid_shuffle_scale_problem_on_disk(
         mf_int bid = get_block_id(N.u, N.v);
         buffer.seekp(pivots[bid]*sizeof(mf_node));
         buffer.write((char*)&N, sizeof(mf_node));
-        pivots[bid]++;
+        pivots[bid] += 1;
     }
 
     for(mf_int i = 0; i < nr_bins*nr_bins; ++i)
@@ -1043,11 +1043,11 @@ mf_model* Utility::init_model(mf_int fun,
         {
             mf_float * ptr = start_ptr + i*model->k;
             if(counts[static_cast<size_t>(i)] > 0)
-                for(mf_long d = 0; d < k_real; d++, ++ptr)
+                for(mf_long d = 0; d < k_real; ++d, ++ptr)
                     *ptr = (mf_float)(distribution(generator)*scale);
             else
                 if(fun != P_ROW_BPR_MFOC && fun != P_COL_BPR_MFOC) // unseen for bpr is 0
-                    for(mf_long d = 0; d < k_real; d++, ++ptr)
+                    for(mf_long d = 0; d < k_real; ++d, ++ptr)
                         *ptr = numeric_limits<mf_float>::quiet_NaN();
         }
     };
@@ -1267,7 +1267,7 @@ protected:
     virtual void finalize();
     static float qrsqrt(float x);
 #endif
-    virtual void update() { pG++; qG++; };
+    virtual void update() { ++pG; ++qG; };
 
     Scheduler &scheduler;
     vector<BlockBase*> &blocks;
@@ -2270,7 +2270,7 @@ protected:
     void sg_update(mf_int d_begin, mf_int d_end, mf_float rk);
     void finalize();
 #endif
-    void update() { pG++; qG++; wG++; };
+    void update() { ++pG; ++qG; ++wG; };
     virtual void prepare_negative() = 0;
 
     bool is_column_oriented;
@@ -4222,7 +4222,7 @@ mf_problem read_problem(string path)
 
     string line;
     while(getline(f, line))
-        prob.nnz++;
+        prob.nnz += 1;
 
     mf_node *R = new mf_node[static_cast<size_t>(prob.nnz)];
 
@@ -4237,7 +4237,7 @@ mf_problem read_problem(string path)
         if(N.v+1 > prob.n)
             prob.n = N.v+1;
         R[idx] = N;
-        idx++;
+        ++idx;
     }
     prob.R = R;
 
@@ -4497,7 +4497,7 @@ pair<mf_double, mf_double> calc_mpr_auc(mf_problem *prob,
 
     vector<mf_int> pos_cnts(m+1, 0);
     for(mf_int i = 0; i < prob->nnz; ++i)
-        pos_cnts[prob->R[i].*row_ptr+1]++;
+        pos_cnts[prob->R[i].*row_ptr+1] += 1;
     for(mf_int i = 1; i < m+1; ++i)
         pos_cnts[i] += pos_cnts[i-1];
 
@@ -4534,20 +4534,20 @@ pair<mf_double, mf_double> calc_mpr_auc(mf_problem *prob,
             mf_int col = prob->R[j].*col_ptr;
             row[col].first.r = prob->R[j].r;
             index[pos] = col;
-            pos++;
+            pos += 1;
         }
 
         if(n-pos < 1 || pos < 1)
             continue;
 
-        total_m++;
+        ++total_m;
         total_pos += pos;
 
         mf_int count = 0;
         for(mf_int k = 0; k < pos; ++k)
         {
             swap(row[count], row[index[k]]);
-            count++;
+            ++count;
         }
         sort(row.begin(), row.begin()+pos, sort_by_pred);
 
