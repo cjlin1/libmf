@@ -3349,13 +3349,23 @@ void calc_ccd_one_class_obj(const mf_int nr_threads,
             negative_loss3 += PTP[k1 + k2 * d] * QTQ[k2 + k1 * d];
     }
     // Compute the loss function of negative matrix entries.
-    mf_double negative_loss4 = negative_loss = 0.5 * alpha *
+    mf_double negative_loss4 = 0.5 * alpha *
         (negative_loss1 - 2 * c * negative_loss2 + negative_loss3);
 
     // Assign results to output variables.
     reg = 0.5 * lambda_p2 * p_square_norm + 0.5 * lambda_q2 * q_square_norm;
+
+    // The function minimized by coordinate descent method.
     obj = positive_loss1 + positive_loss2 + negative_loss4 + reg;
+
+    // Sume of squared error over positive matrix entries (i.e., those mf_node's
+    // in data).
     positive_loss = positive_loss1;
+
+    // Sume of squared error over negative matrix entries (i.e., those mf_node's
+    // in data). The value negative_loss4 contains the squared errors by
+    // considering positive entries as negative entries, so positive_loss2 is
+    // added to compensate that.
     negative_loss = negative_loss4 + positive_loss2;
 }
 
@@ -3367,7 +3377,7 @@ void ccd_one_class_core(
     const mf_parameter param,
     const vector<mf_node*> &ptrs_u,
     const vector<mf_node*> &ptrs_v,
-    shared_ptr<mf_model> &model)
+    /*output*/ shared_ptr<mf_model> &model)
 {
     // Check problems stored in CSR and CSC formats
     if(tr_csr == nullptr) throw invalid_argument("CSR problem pointer is null.");
@@ -3394,18 +3404,37 @@ void ccd_one_class_core(
     // Check formulation parameters
     if(param.k <= 0)
         throw invalid_argument(
-                "Latent dimension must be positive but got " + 
+                "Latent dimension must be positive but got " +
                 to_string(param.k));
     const mf_int d = param.k;
 
+    if(param.lambda_p1 != 0)
+        throw invalid_argument(
+                "P's L1-regularization coefficient must be zero but got " +
+                to_string(param.lambda_p1));
+    if(param.lambda_q1 != 0)
+        throw invalid_argument(
+                "Q's L1-regularization coefficient must be zero but got " +
+                to_string(param.lambda_q1));
+
     if(param.lambda_p2 <= 0)
         throw invalid_argument(
-                "P's regularization coefficient must be positive but got " + 
+                "P's L2-regularization coefficient must be positive but got " +
                 to_string(param.lambda_p2));
     if(param.lambda_q2 <= 0)
         throw invalid_argument(
-                "Q's regularization coefficient must be positive but got " + 
+                "Q's L2-regularization coefficient must be positive but got " +
                 to_string(param.lambda_q2));
+
+    // REVIEW: It is not difficult to support non-negative matrix factorization
+    // for coordinate descent method; we just need to project the updated value
+    // back to the feasible region by using max(0, new_value) right after each
+    // Newton step. LIBMF hasn't support it only because we don't see actual
+    // users.
+    if(param.do_nmf)
+        throw invalid_argument(
+                "Coordinate descent does not support non-negative constraint"); 
+
 
     // Check some resources prepared internally
     if(ptrs_u.size() != (size_t)m + 1)
