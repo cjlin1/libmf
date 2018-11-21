@@ -1,14 +1,22 @@
-dist: trusty
 language: cpp
+
+matrix:
+    include:
+        - os: linux
+          env: DFLAG="-DUSESSE -DUSEOMP"
+        - os: linux
+          env: DFLAG="-DUSEAVX -DUSEOMP"
+        - os: linux
+          env: DFLAG="-DUSESSE -DUSEOMP"
+        - os: linux
+          env: DFLAG="-DUSEOMP"
+        - os: linux
+          env: DFLAG=""
+        - os: osx
+          env: DFLAG="" OMPFLAG=""
 
 install:
     - make -e
-
-env:
-    - DFLAG="-DUSESSE -DUSEOMP"
-    - DFLAG="-DUSEAVX -DUSEOMP"
-    - DFLAG="-DUSEOMP"
-    - DFLAG=""
 
 script:
     - cd demo && sh demo.sh
