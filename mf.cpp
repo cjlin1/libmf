@@ -633,7 +633,7 @@ mf_double Utility::calc_reg1(mf_model &model,
 
             mf_float tmp = 0;
             for(mf_int j = 0; j < model.k; ++j)
-                tmp += abs(ptr[i*model.k+j]);
+                tmp += abs(ptr[(mf_long)i*model.k+j]);
             reg += omega[i]*tmp;
         }
         return reg;
