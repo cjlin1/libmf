@@ -3869,14 +3869,14 @@ try
     sort(tr_csr->R, tr_csr->R+tr_csr->nnz, sort_node_by_p());
     sort(tr_csc->R, tr_csc->R+tr_csc->nnz, sort_node_by_q());
 
-    // Save addresses of rows for CSR and columns for CSC
+    // Save starting addresses of rows for CSR and columns for CSC.
     mf_int u_current = -1;
     mf_int v_current = -1;
     for(mf_long i = 0; i < tr_->nnz; ++i)
     {
         mf_node* N = nullptr;
 
-        // Deal with CSR format
+        // Deal with CSR format.
         N = tr_csr->R + i;
         // Since tr_csr has been sorted by index u, seeing a larger index 
         // implies a new row. Assume a node is encoded a tuple of (u, v, r),
@@ -3892,8 +3892,16 @@ try
         //   ptrs[2] = pointer of (0, 2, 1.5)
         if(N->u > u_current)
         {
+            // We (if u_current != -1) have assigned starting addresses to rows
+            // indexed by values smaller than or equal to u_current. Thus, we
+            // should handle all rows indexed starting from u_current+1 to the
+            // seen row index N->u.
             for(mf_int u_passed = u_current + 1; u_passed <= N->u; ++u_passed)
+            {
+                // i-th non-zero value's location in tr_csr is the starting
+                // address of u_passed-th row.
                 ptrs_u[u_passed] = tr_csr->R + i;
+            }
             u_current = N->u;
         }
 
@@ -3901,17 +3909,27 @@ try
         N = tr_csc->R + i;
         if(N->v > v_current)
         {
+            // We (if v_current != -1) have assigned starting addresses to rows
+            // indexed by values smaller than or equal to v_current. Thus, we
+            // should handle all columns indexed starting from v_current+1 to
+            // the seen row index N->v.
             for(mf_int v_passed = v_current + 1; v_passed <= N->v; ++v_passed)
+            {
+                // i-th non-zero value's location in tr_csc is the starting
+                // address of v_passed-th column.
                 ptrs_v[v_passed] = tr_csc->R + i;
+            }
             v_current = N->v;
         }
 
     }
     // The bound of the last row. It's the address one-element behind the last
     // matrix entry.
-    ptrs_u[tr_->m] = tr_csr->R + tr_csr->nnz;
-    // The bound of the last column.
-    ptrs_v[tr_->n] = tr_csc->R + tr_csc->nnz;
+    for(mf_int u_passed = u_current + 1; u_passed <= tr_->m; ++u_passed)
+        ptrs_u[u_passed] = tr_csr->R + tr_csr->nnz;
+     // The bound of the last column.
+    for(mf_int v_passed = v_current + 1; v_passed <= tr_->n; ++v_passed)
+        ptrs_v[v_passed] = tr_csc->R + tr_csc->nnz;
 
 
     model = shared_ptr<mf_model>(Utility::init_model(tr_->m, tr_->n, param.k),
