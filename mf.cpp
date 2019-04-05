@@ -3729,6 +3729,10 @@ void ccd_one_class_core(
             }
         }
 
+        // Skip the whole evaluation if nothing should be printed out.
+        if(param.quiet)
+            continue;
+
         // Declare variable for storing objective value being minimized
         // by the training procedure. Note that The objective value consists
         // of two parts, loss function and regularization function.
@@ -3787,6 +3791,7 @@ void ccd_one_class_core(
             cout.width(15);
             cout << fixed << setprecision(4) << va_negative_loss;
         }
+
         cout.width(13);
         cout << fixed << setprecision(4) << scientific << obj;
         cout << "\n" << flush;
