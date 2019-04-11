@@ -1230,6 +1230,9 @@ public:
     void run();
     SolverBase(const SolverBase&) = delete;
     SolverBase& operator=(const SolverBase&) = delete;
+    // Solver is stateless functor, so default destructor should be
+    // good enough.
+    virtual ~SolverBase() = default;
 
 protected:
 #if defined USESSE
