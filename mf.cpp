@@ -975,12 +975,15 @@ void Utility::grid_shuffle_scale_problem_on_disk(
 
 mf_float* Utility::malloc_aligned_float(mf_long size)
 {
+    // Check if conversion from mf_long to size_t causes overflow.
+    if (size > numeric_limits<std::size_t>::max() / sizeof(mf_float) + 1)
+        throw bad_alloc();
     // [REVIEW] I hope one day we can use C11 aligned_alloc to replace
     // platform-depedent functions below. Both of Windows and OSX currently
     // don't support that function.
     void *ptr = nullptr;
 #ifdef _WIN32
-    ptr = _aligned_malloc(static_cast<size_t>(size * sizeof(mf_float)),
+    ptr = _aligned_malloc(static_cast<size_t>(size*sizeof(mf_float)),
             kALIGNByte);
 #else
     int status = posix_memalign(&ptr, kALIGNByte, size*sizeof(mf_float));
