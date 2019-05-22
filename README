@@ -148,9 +148,9 @@ Command Line Usage
         - tr_*-: * is the evaluation criterion on the negative entries in the
           training set.
         - va_*: the same criterion on the validation set if `-p' is set
-        - tr_*+: * is the evaluation criterion on the positive entries in the
+        - va_*+: * is the evaluation criterion on the positive entries in the
           validation set.
-        - tr_*-: * is the evaluation criterion on the negative entries in the
+        - va_*-: * is the evaluation criterion on the negative entries in the
           validation set.
         - obj: objective function value.
         - reg: regularization term.
