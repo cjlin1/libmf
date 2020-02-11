@@ -16,10 +16,20 @@ DFLAG = -DUSESSE
 DFLAG += -DUSEOMP
 CXXFLAGS += $(OMPFLAG)
 
+KERNEL_NAME = $(shell uname -s)
+
+ifeq ($(KERNEL_NAME), Darwin)
+	LIB_EXT = $(SHVER).dylib
+	SO_NAME = -install_name
+else
+	LIB_EXT = so.$(SHVER)
+	SO_NAME = -soname
+endif
+
 all: mf-train mf-predict
 
-lib: 
-	$(CXX) -shared -Wl,-soname,libmf.so.$(SHVER) -o libmf.so.$(SHVER) mf.o 
+lib:
+	$(CXX) -shared -Wl,$(SO_NAME),libmf.$(LIB_EXT) -o libmf.$(LIB_EXT) mf.o
 
 mf-train: mf-train.cpp mf.o
 	$(CXX) $(CXXFLAGS) $(DFLAG) -o $@ $^
@@ -31,4 +41,4 @@ mf.o: mf.cpp mf.h
 	$(CXX) $(CXXFLAGS) $(DFLAG) -c -fPIC -o $@ $<
 
 clean:
-	rm -f mf-train mf-predict mf.o libmf.so.$(SHVER)
+	rm -f mf-train mf-predict mf.o libmf.$(LIB_EXT)
