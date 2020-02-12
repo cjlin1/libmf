@@ -16,7 +16,8 @@ matrix:
           env: DFLAG="" OMPFLAG=""
 
 install:
-    - make -e
+    - make -e all
+    - make -e lib
 
 script:
     - cd demo && sh demo.sh
