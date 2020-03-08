@@ -21,7 +21,7 @@
 
 #if defined __AVX__ && !defined USESSE
 #define USEAVX 1
-#elif defined __SSE__
+#elif defined __SSE__ && !defined NOSSE
 #define USESSE 1
 #endif
 

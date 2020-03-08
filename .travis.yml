@@ -7,7 +7,7 @@ matrix:
         - os: linux
           env: DFLAG="-DUSEOMP" OPTFLAG="-mavx"
         - os: linux
-          env: DFLAG="-DUSEOMP" OPTFLAG="-mno-sse"
+          env: DFLAG="-DUSEOMP" OPTFLAG="-DNOSSE"
         - os: linux
           env: DFLAG="-Wl,--no-as-needed"
         - os: osx
