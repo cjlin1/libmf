@@ -4267,6 +4267,11 @@ mf_double mf_cross_validation_on_disk(
     return validator.do_cross_validation();
 }
 
+mf_problem mf_read_problem(char const *path)
+{
+    return read_problem(path);
+}
+
 mf_problem read_problem(string path)
 {
     mf_problem prob;
