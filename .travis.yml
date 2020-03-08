@@ -3,13 +3,11 @@ language: cpp
 matrix:
     include:
         - os: linux
-          env: DFLAG="-DUSESSE -DUSEOMP"
+          env: DFLAG="-DUSEOMP" OPTFLAG="-msse"
         - os: linux
-          env: DFLAG="-DUSEAVX -DUSEOMP"
+          env: DFLAG="-DUSEOMP" OPTFLAG="-mavx"
         - os: linux
-          env: DFLAG="-DUSESSE -DUSEOMP"
-        - os: linux
-          env: DFLAG="-DUSEOMP"
+          env: DFLAG="-DUSEOMP" OPTFLAG="-mno-sse"
         - os: linux
           env: DFLAG="-Wl,--no-as-needed"
         - os: osx

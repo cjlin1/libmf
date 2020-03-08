@@ -19,6 +19,12 @@
 
 #include "mf.h"
 
+#if defined __AVX__ && !defined USESSE
+#define USEAVX 1
+#elif defined __SSE__
+#define USESSE 1
+#endif
+
 #if defined USESSE
 #include <pmmintrin.h>
 #endif
