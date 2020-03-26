@@ -71,8 +71,6 @@ struct mf_model
 
 mf_problem read_problem(std::string path);
 
-mf_problem mf_read_problem(char const *path);
-
 mf_int mf_save_model(struct mf_model const *model, char const *path);
 
 struct mf_model* mf_load_model(char const *path);
@@ -122,6 +120,8 @@ mf_double calc_accuracy(mf_problem *prob, mf_model *model);
 mf_double calc_mpr(mf_problem *prob, mf_model *model, bool transpose);
 
 mf_double calc_auc(mf_problem *prob, mf_model *model, bool transpose);
+
+mf_problem mf_read_problem(char const *path);
 
 #ifdef __cplusplus
 } // namespace mf
