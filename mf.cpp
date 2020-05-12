@@ -1114,11 +1114,11 @@ mf_model* Utility::init_model(mf_int m, mf_int n, mf_int k)
 
 vector<mf_int> Utility::gen_random_map(mf_int size)
 {
-    srand(0);
+    default_random_engine generator;
     vector<mf_int> map(size, 0);
     for(mf_int i = 0; i < size; ++i)
         map[i] = i;
-    random_shuffle(map.begin(), map.end());
+    shuffle(map.begin(), map.end(), generator);
     return map;
 }
 
@@ -4070,10 +4070,10 @@ CrossValidatorBase::CrossValidatorBase(mf_parameter param_, mf_int nr_folds_)
 mf_double CrossValidatorBase::do_cross_validation()
 {
     vector<mf_int> cv_blocks;
-    srand(0);
+    default_random_engine generator;
     for(mf_int block = 0; block < nr_bins*nr_bins; ++block)
         cv_blocks.push_back(block);
-    random_shuffle(cv_blocks.begin(), cv_blocks.end());
+    shuffle(cv_blocks.begin(), cv_blocks.end(), generator);
 
     if(!quiet)
     {
