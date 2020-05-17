@@ -121,6 +121,8 @@ mf_double calc_mpr(mf_problem *prob, mf_model *model, bool transpose);
 
 mf_double calc_auc(mf_problem *prob, mf_model *model, bool transpose);
 
+mf_problem mf_read_problem(char const *path);
+
 #ifdef __cplusplus
 } // namespace mf
 
