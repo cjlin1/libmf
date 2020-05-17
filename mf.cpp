@@ -363,7 +363,7 @@ void Block::tie_to(mf_node *first_, mf_node *last_)
 {
     first = first_;
     last = last_;
-};
+}
 
 class BlockOnDisk : public BlockBase
 {
@@ -4018,12 +4018,6 @@ bool check_parameter(mf_parameter param)
         cerr << "--nmf must be set when using generalized KL-divergence"
              << endl;
         return false;
-    }
-
-    if(param.nr_bins <= 2*param.nr_threads)
-    {
-        cerr << "Warning: insufficient blocks may slow down the training"
-             << "process (4*nr_threads^2+1 blocks is suggested)" << endl;
     }
 
     if(param.nr_bins <= 2*param.nr_threads)
