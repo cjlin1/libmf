@@ -4026,12 +4026,6 @@ bool check_parameter(mf_parameter param)
              << "process (4*nr_threads^2+1 blocks is suggested)" << endl;
     }
 
-    if(param.nr_bins <= 2*param.nr_threads)
-    {
-        cerr << "Warning: insufficient blocks may slow down the training"
-             << "process (4*nr_threads^2+1 blocks is suggested)" << endl;
-    }
-
     if(param.alpha < 0)
     {
         cerr << "alpha must be a non-negative number" << endl;
