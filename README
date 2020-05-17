@@ -541,22 +541,7 @@ Functions available in LIBMF include:
 SSE, AVX, and OpenMP
 ====================
 
-LIBMF utilizes SSE instructions to accelerate the computation. If you cannot
-use SSE on your platform, then please comment out
-
-    DFLAG = -DUSESSE
-
-in Makefile to disable SSE.
-
-Some modern CPUs support AVX, which is more powerful than SSE. To enable AVX,
-please comment out
-
-    DFLAG = -DUSESSE
-
-and uncomment the following lines in Makefile.
-
-    DFLAG = -DUSEAVX
-    CFLAGS += -mavx
+LIBMF utilizes AVX and SSE instructions when available on your platform.
 
 If OpenMP is not available on your platform, please comment out the following
 lines in Makefile.
