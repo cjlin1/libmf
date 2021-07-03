@@ -598,7 +598,7 @@ mf_float Utility::inner_product(mf_float *p, mf_float *q, mf_int k)
         XMM = _mm_add_ps(XMM, _mm_mul_ps(
                   _mm_load_ps(p+d), _mm_load_ps(q+d)));
     __m128 XMMtmp = _mm_add_ps(XMM, _mm_movehl_ps(XMM, XMM));
-    XMM = _mm_add_ps(XMM, _mm_shuffle_ps(XMMtmp, XMMtmp, 1));
+    XMM = _mm_add_ps(XMMtmp, _mm_shuffle_ps(XMMtmp, XMMtmp, 1));
     mf_float product;
     _mm_store_ss(&product, XMM);
     return product;
