@@ -598,7 +598,7 @@ mf_float Utility::inner_product(mf_float *p, mf_float *q, mf_int k)
         XMM = _mm_add_ps(XMM, _mm_mul_ps(
                   _mm_load_ps(p+d), _mm_load_ps(q+d)));
     __m128 XMMtmp = _mm_add_ps(XMM, _mm_movehl_ps(XMM, XMM));
-    XMM = _mm_add_ps(XMM, _mm_shuffle_ps(XMMtmp, XMMtmp, 1));
+    XMM = _mm_add_ps(XMMtmp, _mm_shuffle_ps(XMMtmp, XMMtmp, 1));
     mf_float product;
     _mm_store_ss(&product, XMM);
     return product;
@@ -976,8 +976,7 @@ void Utility::grid_shuffle_scale_problem_on_disk(
 mf_float* Utility::malloc_aligned_float(mf_long size)
 {
     // Check if conversion from mf_long to size_t causes overflow.
-    if (size >= 0 && sizeof(unsigned long) >= sizeof(mf_long) &&
-        (unsigned long)size > numeric_limits<std::size_t>::max() / sizeof(mf_float) + 1)
+    if (size > numeric_limits<std::size_t>::max() / sizeof(mf_float) + 1)
         throw bad_alloc();
     // [REVIEW] I hope one day we can use C11 aligned_alloc to replace
     // platform-depedent functions below. Both of Windows and OSX currently
@@ -1028,7 +1027,7 @@ mf_model* Utility::init_model(mf_int fun,
     model->Q = nullptr;
 
     mf_float scale = (mf_float)sqrt(1.0/k_real);
-    default_random_engine generator;
+    default_random_engine generator(0); // (exp) fix random seed to zero.
     uniform_real_distribution<mf_float> distribution(0.0, 1.0);
 
     try
@@ -1115,11 +1114,11 @@ mf_model* Utility::init_model(mf_int m, mf_int n, mf_int k)
 
 vector<mf_int> Utility::gen_random_map(mf_int size)
 {
-    default_random_engine generator;
+    srand(0);
     vector<mf_int> map(size, 0);
     for(mf_int i = 0; i < size; ++i)
         map[i] = i;
-    shuffle(map.begin(), map.end(), generator);
+    random_shuffle(map.begin(), map.end());
     return map;
 }
 
@@ -2893,6 +2892,27 @@ shared_ptr<SolverBase> SolverFactory::get_solver(
     return solver;
 }
 
+mf_double calc_loss(vector<BlockBase*> &blocks, mf_model &model){
+    mf_node *N;
+    mf_float *p;
+    mf_float *q;
+    mf_double loss = 0;
+    for(mf_int i = 0; i < (mf_long)blocks.size(); ++i){
+        BlockBase* block = blocks[i];
+        block->reload();
+        while(block->move_next())
+        {
+            N = block->get_current();
+            p = model.P+(mf_long)N->u*model.k;
+            q = model.Q+(mf_long)N->v*model.k;
+            mf_double z = Utility::inner_product(p,q,model.k);
+            z = N->r-z;
+            loss += z*z;
+        }
+    }
+    return loss;
+}
+
 void fpsg_core(
     Utility &util,
     Scheduler &sched,
@@ -2950,6 +2970,8 @@ void fpsg_core(
         }
         cout.width(13);
         cout << "obj";
+        cout.width(10);
+        cout << "time";
         cout << "\n";
     }
 
@@ -2959,6 +2981,21 @@ void fpsg_core(
     vector<shared_ptr<SolverBase>> solvers(param.nr_threads);
     vector<thread> threads;
     threads.reserve(param.nr_threads);
+
+    if(true){ // (exp) toggle init model check 
+      mf_double init_reg2 = util.calc_reg2(*model, param.lambda_p2,
+                               param.lambda_q2, omega_p, omega_q);
+      cerr << "initial reg: ";
+      cerr.width(15);
+      cerr << fixed << setprecision(4) << 0.5*init_reg2;
+      mf_double init_loss = calc_loss(block_ptrs, *model);
+      cerr.width(15);
+      cerr << "initial loss: ";
+      cerr.width(15);
+      cerr << fixed << setprecision(4) << 0.5*init_loss << endl;
+    }
+
+    double st = omp_get_wtime(); 
     for(mf_int i = 0; i < param.nr_threads; ++i)
     {
         solvers[i] = SolverFactory::get_solver(sched, block_ptrs,
@@ -2978,7 +3015,7 @@ void fpsg_core(
                              param.lambda_q1, omega_p, omega_q);
             mf_double reg2 = util.calc_reg2(*model, param.lambda_p2,
                              param.lambda_q2, omega_p, omega_q);
-            mf_double tr_loss = sched.get_loss();
+            mf_double tr_loss = calc_loss(block_ptrs, *model); // (exp) mf_double tr_loss = sched.get_loss();
             mf_double tr_error = sched.get_error()/tr->nnz;
 
             switch(param.fun)
@@ -3025,7 +3062,9 @@ void fpsg_core(
                 cout << fixed << setprecision(4) << va_error;
             }
             cout.width(13);
-            cout << fixed << setprecision(4) << scientific << reg+tr_loss;
+            cout << fixed << setprecision(4) << scientific << 0.5*(reg+tr_loss);
+            cout.width(10);
+            cout << fixed << setprecision(2) << omp_get_wtime() - st;
             cout << "\n" << flush;
         }
 
@@ -3081,10 +3120,10 @@ try
     vector<Block> blocks(param.nr_bins*param.nr_bins);
     vector<BlockBase*> block_ptrs(param.nr_bins*param.nr_bins);
     vector<mf_node*> ptrs;
-    vector<mf_int> p_map;
-    vector<mf_int> q_map;
-    vector<mf_int> inv_p_map;
-    vector<mf_int> inv_q_map;
+    vector<mf_int> p_map, p_map_cp;
+    vector<mf_int> q_map, q_map_cp;
+    vector<mf_int> inv_p_map, inv_p_map_cp;
+    vector<mf_int> inv_q_map, inv_q_map_cp;
     vector<mf_int> omega_p;
     vector<mf_int> omega_q;
     mf_float avg = 0;
@@ -3109,12 +3148,12 @@ try
     if(param.fun == P_L2_MFR ||
        param.fun == P_L1_MFR ||
        param.fun == P_KL_MFR)
-        scale = max((mf_float)1e-4, std_dev);
+        scale = 1.0; // (exp) disable scale scale = max((mf_float)1e-4, std_dev);
 
-    p_map = Utility::gen_random_map(tr->m);
-    q_map = Utility::gen_random_map(tr->n);
-    inv_p_map = Utility::gen_inv_map(p_map);
-    inv_q_map = Utility::gen_inv_map(q_map);
+    p_map = p_map_cp = Utility::gen_random_map(tr->m);
+    q_map = q_map_cp = Utility::gen_random_map(tr->n);
+    inv_p_map = inv_p_map_cp = Utility::gen_inv_map(p_map);
+    inv_q_map = inv_q_map_cp = Utility::gen_inv_map(q_map);
     omega_p = vector<mf_int>(tr->m, 0);
     omega_q = vector<mf_int>(tr->n, 0);
 
@@ -3127,6 +3166,12 @@ try
     model = shared_ptr<mf_model>(Utility::init_model(param.fun,
                 tr->m, tr->n, param.k, avg/scale, omega_p, omega_q),
                 [] (mf_model *ptr) { mf_destroy_model(&ptr); });
+
+    if(true){ // (exp) toggle save model 
+      Utility::shuffle_model(*model, inv_p_map_cp, inv_q_map_cp);
+      mf_save_initial_model(model.get());
+      Utility::shuffle_model(*model, p_map_cp, q_map_cp); // (exp) shuffle model base
+    }
 
     for(mf_int i = 0; i < (mf_long)blocks.size(); ++i)
         block_ptrs[i] = &blocks[i];
@@ -4071,10 +4116,10 @@ CrossValidatorBase::CrossValidatorBase(mf_parameter param_, mf_int nr_folds_)
 mf_double CrossValidatorBase::do_cross_validation()
 {
     vector<mf_int> cv_blocks;
-    default_random_engine generator;
+    srand(0);
     for(mf_int block = 0; block < nr_bins*nr_bins; ++block)
         cv_blocks.push_back(block);
-    shuffle(cv_blocks.begin(), cv_blocks.end(), generator);
+    random_shuffle(cv_blocks.begin(), cv_blocks.end());
 
     if(!quiet)
     {
@@ -4348,6 +4393,46 @@ mf_int mf_save_model(mf_model const *model, char const *path)
     write(model->Q, model->n, 'q');
 
     f.close();
+
+    return 0;
+}
+
+// (exp) save init model for matlab libmf code.
+mf_int mf_save_initial_model(mf_model const *model)
+{
+    ofstream fp("P.model");
+    ofstream fq("Q.model");
+    if(!fp.is_open())
+        return 1;
+    
+    if(!fq.is_open())
+        return 1;
+
+    auto write = [&] (ofstream &f, mf_float *ptr, mf_int size, char prefix)
+    {
+        for(mf_int i = 1; i < size; ++i) // (exp) the data index is started from index 1 
+        {
+            mf_float *ptr1 = ptr + (mf_long)i*model->k;
+            if(isnan(ptr1[0]))
+            {
+                for(mf_int d = 0; d < model->k; ++d)
+                    f << 0 << " ";
+            }
+            else
+            {
+                for(mf_int d = 0; d < model->k; ++d)
+                    f << ptr1[d] << " ";
+            }
+            f << endl;
+        }
+
+    };
+
+    write(fp, model->P, model->m, 'p');
+    write(fq, model->Q, model->n, 'q');
+
+    fp.close();
+    fq.close();
 
     return 0;
 }
