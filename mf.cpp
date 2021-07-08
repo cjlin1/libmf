@@ -4415,13 +4415,15 @@ mf_int mf_save_initial_model(mf_model const *model)
             mf_float *ptr1 = ptr + (mf_long)i*model->k;
             if(isnan(ptr1[0]))
             {
-                for(mf_int d = 0; d < model->k; ++d)
-                    f << 0 << " ";
+                f << 0 << " ";
+                for(mf_int d = 1; d < model->k; ++d)
+                    f << " " << 0;
             }
             else
             {
-                for(mf_int d = 0; d < model->k; ++d)
-                    f << ptr1[d] << " ";
+                f << ptr1[0] << " ";
+                for(mf_int d = 1; d < model->k; ++d)
+                    f << " " << ptr1[d];
             }
             f << endl;
         }
