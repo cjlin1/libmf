@@ -72,6 +72,7 @@ struct mf_model
 mf_problem read_problem(std::string path);
 
 mf_int mf_save_model(struct mf_model const *model, char const *path);
+mf_int mf_save_initial_model(struct mf_model const *model);
 
 struct mf_model* mf_load_model(char const *path);
 
