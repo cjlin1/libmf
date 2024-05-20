@@ -682,7 +682,7 @@ mf_double Utility::calc_error(
 #if defined USEOMP
 #pragma omp parallel for num_threads(nr_threads) schedule(static) reduction(+:error)
 #endif
-        for(mf_int i = 0; i < (mf_long)cv_block_ids.size(); ++i)
+        for(mf_long i = 0; i < (mf_long)cv_block_ids.size(); ++i)
         {
             BlockBase *block = blocks[cv_block_ids[i]];
             block->reload();
@@ -733,7 +733,7 @@ mf_double Utility::calc_error(
 #if defined USEOMP
 #pragma omp parallel for num_threads(nr_threads) schedule(static) reduction(+:error)
 #endif
-                for(mf_int i = 0; i < (mf_long)cv_block_ids.size(); ++i)
+                for(mf_long i = 0; i < (mf_long)cv_block_ids.size(); ++i)
                 {
                     BlockBase *block = blocks[cv_block_ids[i]];
                     block->reload();
@@ -754,7 +754,7 @@ mf_double Utility::calc_error(
 #if defined USEOMP
 #pragma omp parallel for num_threads(nr_threads) schedule(static) reduction(+:error)
 #endif
-                for(mf_int i = 0; i < (mf_long)cv_block_ids.size(); ++i)
+                for(mf_long i = 0; i < (mf_long)cv_block_ids.size(); ++i)
                 {
                     BlockBase *block = blocks[cv_block_ids[i]];
                     block->reload();
@@ -891,7 +891,7 @@ vector<mf_node*> Utility::grid_problem(
             sort(ptrs[block], ptrs[block+1], sort_node_by_q());
     }
 
-    for(mf_int i = 0; i < (mf_long)blocks.size(); ++i)
+    for(mf_long i = 0; i < (mf_long)blocks.size(); ++i)
         blocks[i].tie_to(ptrs[i], ptrs[i+1]);
 
     return ptrs;
@@ -969,7 +969,7 @@ void Utility::grid_shuffle_scale_problem_on_disk(
         buffer.read((char*)nodes.data(), sizeof(mf_node)*nodes.size());
     }
 
-    for(mf_int i = 0; i < (mf_long)blocks.size(); ++i)
+    for(mf_long i = 0; i < (mf_long)blocks.size(); ++i)
         blocks[i].tie_to(buffer_path, counts[i], counts[i+1]);
 }
 
@@ -1126,7 +1126,7 @@ vector<mf_int> Utility::gen_random_map(mf_int size)
 vector<mf_int> Utility::gen_inv_map(vector<mf_int> &map)
 {
     vector<mf_int> inv_map(map.size());
-    for(mf_int i = 0; i < (mf_long)map.size(); ++i)
+    for(mf_int i = 0; i < (mf_int)map.size(); ++i)
       inv_map[map[i]] = i;
     return inv_map;
 }
@@ -3128,7 +3128,7 @@ try
                 tr->m, tr->n, param.k, avg/scale, omega_p, omega_q),
                 [] (mf_model *ptr) { mf_destroy_model(&ptr); });
 
-    for(mf_int i = 0; i < (mf_long)blocks.size(); ++i)
+    for(mf_long i = 0; i < (mf_long)blocks.size(); ++i)
         block_ptrs[i] = &blocks[i];
 
     fpsg_core(util, sched, tr.get(), va.get(), param, scale,
@@ -3205,7 +3205,7 @@ try
                 tr.m, tr.n, param.k, avg/scale, omega_p, omega_q),
                 [] (mf_model *ptr) { mf_destroy_model(&ptr); });
 
-    for(mf_int i = 0; i < (mf_long)blocks.size(); ++i)
+    for(mf_long i = 0; i < (mf_long)blocks.size(); ++i)
         block_ptrs[i] = &blocks[i];
 
     fpsg_core(util, sched, &tr, &va, param, scale,
@@ -4553,7 +4553,7 @@ pair<mf_double, mf_double> calc_mpr_auc(mf_problem *prob,
         pair<mf_node, mf_float> const &rhs) { return lhs.second < rhs.second; };
 
     vector<mf_int> pos_cnts(m+1, 0);
-    for(mf_int i = 0; i < prob->nnz; ++i)
+    for(mf_long i = 0; i < prob->nnz; ++i)
         pos_cnts[prob->R[i].*row_ptr+1] += 1;
     for(mf_int i = 1; i < m+1; ++i)
         pos_cnts[i] += pos_cnts[i-1];
